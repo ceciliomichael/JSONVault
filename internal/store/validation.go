@@ -7,6 +7,16 @@ import (
 
 const maxNameLength = 128
 
+func ValidateDatabaseName(name string) error {
+	if err := validateSegment("database", name); err != nil {
+		return err
+	}
+	if strings.EqualFold(name, "databases") || strings.EqualFold(name, "collections") {
+		return fmt.Errorf("%w: %q is used by the management API", ErrReservedName, name)
+	}
+	return nil
+}
+
 func ValidateCollectionName(name string) error {
 	if err := validateSegment("collection", name); err != nil {
 		return err

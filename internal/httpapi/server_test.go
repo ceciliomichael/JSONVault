@@ -14,7 +14,7 @@ import (
 func TestAPIRequiresAuthorization(t *testing.T) {
 	handler := testHandler(t)
 
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/collections", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/databases", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 
@@ -23,20 +23,44 @@ func TestAPIRequiresAuthorization(t *testing.T) {
 	}
 }
 
-func TestAPICollectionAndDocumentLifecycle(t *testing.T) {
+func TestAPIDatabaseCollectionAndDocumentLifecycle(t *testing.T) {
 	handler := testHandler(t)
 
-	response := doJSON(t, handler, http.MethodPost, "/api/v1/collections", `{"name":"users"}`)
+	// Create database
+	response := doJSON(t, handler, http.MethodPost, "/api/v1/databases", `{"name":"testdb"}`)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create database status = %d, body=%s", response.Code, response.Body.String())
+	}
+
+	response = doJSON(t, handler, http.MethodPost, "/api/v1/databases", `{"name":"testdb"}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("idempotent create database status = %d, body=%s", response.Code, response.Body.String())
+	}
+
+	response = doJSON(t, handler, http.MethodGet, "/api/v1/databases", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("list databases status = %d, body=%s", response.Code, response.Body.String())
+	}
+	var listedDBs []string
+	if err := json.Unmarshal(response.Body.Bytes(), &listedDBs); err != nil {
+		t.Fatalf("decode databases response: %v", err)
+	}
+	if len(listedDBs) != 1 || listedDBs[0] != "testdb" {
+		t.Fatalf("unexpected databases: %#v", listedDBs)
+	}
+
+	// Create collection
+	response = doJSON(t, handler, http.MethodPost, "/api/v1/testdb/collections", `{"name":"users"}`)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("create collection status = %d, body=%s", response.Code, response.Body.String())
 	}
 
-	response = doJSON(t, handler, http.MethodPost, "/api/v1/collections", `{"name":"users"}`)
+	response = doJSON(t, handler, http.MethodPost, "/api/v1/testdb/collections", `{"name":"users"}`)
 	if response.Code != http.StatusOK {
 		t.Fatalf("idempotent create collection status = %d, body=%s", response.Code, response.Body.String())
 	}
 
-	response = doJSON(t, handler, http.MethodGet, "/api/v1/collections", "")
+	response = doJSON(t, handler, http.MethodGet, "/api/v1/testdb/collections", "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("list collections status = %d, body=%s", response.Code, response.Body.String())
 	}
@@ -48,7 +72,8 @@ func TestAPICollectionAndDocumentLifecycle(t *testing.T) {
 		t.Fatalf("unexpected collections: %#v", listed)
 	}
 
-	response = doJSON(t, handler, http.MethodPost, "/api/v1/users", `{"name":"Alice","active":true}`)
+	// Create Document
+	response = doJSON(t, handler, http.MethodPost, "/api/v1/testdb/users", `{"name":"Alice","active":true}`)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("create document status = %d, body=%s", response.Code, response.Body.String())
 	}
@@ -60,17 +85,20 @@ func TestAPICollectionAndDocumentLifecycle(t *testing.T) {
 		t.Fatalf("unexpected created document: %#v", created)
 	}
 
-	response = doJSON(t, handler, http.MethodGet, "/api/v1/users/"+created.ID, "")
+	// Get Document
+	response = doJSON(t, handler, http.MethodGet, "/api/v1/testdb/users/"+created.ID, "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("get document status = %d, body=%s", response.Code, response.Body.String())
 	}
 
-	response = doJSON(t, handler, http.MethodPut, "/api/v1/users/"+created.ID, `{"name":"Alice","active":false}`)
+	// Put Document
+	response = doJSON(t, handler, http.MethodPut, "/api/v1/testdb/users/"+created.ID, `{"name":"Alice","active":false}`)
 	if response.Code != http.StatusOK {
 		t.Fatalf("put document status = %d, body=%s", response.Code, response.Body.String())
 	}
 
-	response = doJSON(t, handler, http.MethodGet, "/api/v1/users", "")
+	// List Documents
+	response = doJSON(t, handler, http.MethodGet, "/api/v1/testdb/users", "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("list documents status = %d, body=%s", response.Code, response.Body.String())
 	}
@@ -82,21 +110,29 @@ func TestAPICollectionAndDocumentLifecycle(t *testing.T) {
 		t.Fatalf("unexpected document list: %#v", documents)
 	}
 
-	response = doJSON(t, handler, http.MethodDelete, "/api/v1/users/"+created.ID, "")
+	// Delete Document
+	response = doJSON(t, handler, http.MethodDelete, "/api/v1/testdb/users/"+created.ID, "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("delete document status = %d, body=%s", response.Code, response.Body.String())
 	}
 
-	response = doJSON(t, handler, http.MethodDelete, "/api/v1/collections/users", "")
+	// Delete Collection
+	response = doJSON(t, handler, http.MethodDelete, "/api/v1/testdb/collections/users", "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("delete collection status = %d, body=%s", response.Code, response.Body.String())
+	}
+
+	// Delete Database
+	response = doJSON(t, handler, http.MethodDelete, "/api/v1/testdb", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("delete database status = %d, body=%s", response.Code, response.Body.String())
 	}
 }
 
 func TestAPIRejectsInvalidDocumentJSON(t *testing.T) {
 	handler := testHandler(t)
 
-	response := doJSON(t, handler, http.MethodPost, "/api/v1/users", `not-json`)
+	response := doJSON(t, handler, http.MethodPost, "/api/v1/testdb/users", `not-json`)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d body=%s", response.Code, http.StatusBadRequest, response.Body.String())
 	}

@@ -16,18 +16,19 @@ JSONVAULT_BASE_URL=https://db.yourdomain.com
 
 ### How to Use JSONVault (Mental Model)
 
-JSONVault is ideal for lightweight applications, prototypes, or any system where you need persistent storage without the overhead of a massive database engine. 
+JSONVault is designed to support multiple completely isolated projects on the same server, structured in a 3-tier hierarchy: **Database -> Collection -> Document**.
 
 You can use it to:
 - Store user profiles and application settings.
 - Manage a small product catalog or blog posts.
 - Save temporary state or cache data from other APIs.
 
-**Collections & Documents:**
-Think of a **Collection** as a folder or a table (e.g., `users`, `products`). 
-Think of a **Document** as a single entry within that collection, represented by a flexible JSON object. 
+**Hierarchy:**
+1. **Database:** Think of a database as an isolated container for a single application or project (e.g., `ecommerce_db`, `blog_db`).
+2. **Collection:** Within a database, a collection acts like a folder or a table (e.g., `users`, `products`).
+3. **Document:** Within a collection, a document is a single entry represented by a flexible JSON object.
 
-When you send a new document to a collection, JSONVault automatically creates the collection folder if it doesn't exist, assigns a unique ID to your document, and saves it safely to the disk. You can then retrieve, update, or delete that specific document using its ID.
+When you send a new document to a database and collection, JSONVault automatically creates both the database and the collection if they don't exist, assigns a unique ID to your document, and saves it safely to the disk. You can then retrieve, update, or delete that specific document using its ID.
 
 ## General Requirements
 
@@ -59,9 +60,9 @@ When an error occurs, the API returns a standard JSON error response:
 ```
 
 Common HTTP status codes include:
-- `400 Bad Request`: Invalid JSON, invalid collection names, etc.
+- `400 Bad Request`: Invalid JSON, invalid names, etc.
 - `401 Unauthorized`: Missing or invalid API key.
-- `404 Not Found`: Collection, document, or route does not exist.
+- `404 Not Found`: Database, collection, document, or route does not exist.
 - `405 Method Not Allowed`: HTTP method is not supported for the route.
 - `413 Payload Too Large`: Request body exceeds the configured maximum size (default 10MB).
 - `415 Unsupported Media Type`: `Content-Type` was not `application/json`.
@@ -83,11 +84,58 @@ Checks if the server is running. No authentication required.
 
 ---
 
+## Database Management
+
+### List Databases
+`GET /api/v1/databases`
+Returns an array of all database names.
+
+**Response (200 OK):**
+```json
+[
+  "ecommerce_db",
+  "blog_db"
+]
+```
+
+### Create Database
+`POST /api/v1/databases`
+Explicitly creates a new empty database. (Note: Databases are also created automatically when you insert the first document into them).
+
+**Request Body:**
+```json
+{
+  "name": "my_new_database"
+}
+```
+
+**Response (201 Created or 200 OK):**
+```json
+{
+  "name": "my_new_database",
+  "created": true
+}
+```
+
+### Delete Database
+`DELETE /api/v1/{database}`
+Permanently deletes a database and all of its collections and documents.
+
+**Response (200 OK):**
+```json
+{
+  "deleted": true,
+  "name": "my_new_database"
+}
+```
+
+---
+
 ## Collections Management
 
 ### List Collections
-`GET /api/v1/collections`
-Returns an array of all collection names.
+`GET /api/v1/{database}/collections`
+Returns an array of all collection names in a database.
 
 **Response (200 OK):**
 ```json
@@ -98,8 +146,8 @@ Returns an array of all collection names.
 ```
 
 ### Create Collection
-`POST /api/v1/collections`
-Explicitly creates a new empty collection. (Note: Collections are also created automatically when you insert the first document into them).
+`POST /api/v1/{database}/collections`
+Explicitly creates a new empty collection.
 
 **Request Body:**
 ```json
@@ -109,7 +157,6 @@ Explicitly creates a new empty collection. (Note: Collections are also created a
 ```
 
 **Response (201 Created or 200 OK):**
-If the collection was newly created, it returns `201 Created`. If it already existed, it safely ignores the request and returns `200 OK`.
 ```json
 {
   "name": "my_new_collection",
@@ -118,7 +165,7 @@ If the collection was newly created, it returns `201 Created`. If it already exi
 ```
 
 ### Delete Collection
-`DELETE /api/v1/collections/{collection}`
+`DELETE /api/v1/{database}/collections/{collection}`
 Permanently deletes a collection and all of its contained documents.
 
 **Response (200 OK):**
@@ -134,27 +181,26 @@ Permanently deletes a collection and all of its contained documents.
 ## Document Management
 
 ### List Documents
-`GET /api/v1/{collection}`
-Returns an array of all documents within the specified collection.
+`GET /api/v1/{database}/{collection}`
+Returns an array of all documents within the specified database and collection.
 
 **Response (200 OK):**
 ```json
 [
   {
     "id": "12345",
-    "document": { ... }
+    "document": { "username": "alice" }
   },
   {
     "id": "67890",
-    "document": { ... }
+    "document": { "username": "bob" }
   }
 ]
 ```
-*(Note: The exact structure depends on the `store.Document` struct implementation, but it typically wraps the ID and the raw JSON data).*
 
 ### Create Document
-`POST /api/v1/{collection}`
-Creates a new document in the collection with an auto-generated ID.
+`POST /api/v1/{database}/{collection}`
+Creates a new document in the database and collection with an auto-generated ID.
 
 **Request Body:**
 Any valid JSON object.
@@ -177,7 +223,7 @@ Any valid JSON object.
 ```
 
 ### Get Document
-`GET /api/v1/{collection}/{id}`
+`GET /api/v1/{database}/{collection}/{id}`
 Retrieves a single document by its ID.
 
 **Response (200 OK):**
@@ -192,7 +238,7 @@ Retrieves a single document by its ID.
 ```
 
 ### Update Document
-`PUT /api/v1/{collection}/{id}`
+`PUT /api/v1/{database}/{collection}/{id}`
 Completely overwrites the existing document with the new JSON data.
 
 **Request Body:**
@@ -216,7 +262,7 @@ Any valid JSON object.
 ```
 
 ### Delete Document
-`DELETE /api/v1/{collection}/{id}`
+`DELETE /api/v1/{database}/{collection}/{id}`
 Permanently removes a document from the collection.
 
 **Response (200 OK):**

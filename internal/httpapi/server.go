@@ -16,14 +16,17 @@ import (
 const defaultMaxBodyBytes int64 = 10 * 1024 * 1024
 
 type Store interface {
-	CreateCollection(name string) (bool, error)
-	ListCollections() ([]string, error)
-	DeleteCollection(name string) error
-	CreateDocument(collection string, body []byte) (store.Document, error)
-	ListDocuments(collection string) ([]store.Document, error)
-	GetDocument(collection, id string) (store.Document, error)
-	PutDocument(collection, id string, body []byte) (store.Document, error)
-	DeleteDocument(collection, id string) error
+	CreateDatabase(name string) (bool, error)
+	ListDatabases() ([]string, error)
+	DeleteDatabase(name string) error
+	CreateCollection(database, collection string) (bool, error)
+	ListCollections(database string) ([]string, error)
+	DeleteCollection(database, collection string) error
+	CreateDocument(database, collection string, body []byte) (store.Document, error)
+	ListDocuments(database, collection string) ([]store.Document, error)
+	GetDocument(database, collection, id string) (store.Document, error)
+	PutDocument(database, collection, id string, body []byte) (store.Document, error)
+	DeleteDocument(database, collection, id string) error
 }
 
 type Options struct {
@@ -60,39 +63,86 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.URL.Path == "/api/v1/collections" {
-		s.handleCollections(w, r)
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/")
+	if path == r.URL.Path {
+		writeError(w, http.StatusNotFound, "not_found", "route not found")
 		return
 	}
 
-	if strings.HasPrefix(r.URL.Path, "/api/v1/collections/") {
-		s.handleCollectionByName(w, r)
+	if path == "databases" || path == "databases/" {
+		s.handleDatabases(w, r)
 		return
 	}
 
-	if strings.HasPrefix(r.URL.Path, "/api/v1/") {
-		s.handleDocuments(w, r)
+	parts := routeParts(path)
+	if len(parts) == 0 {
+		writeError(w, http.StatusNotFound, "not_found", "route not found")
+		return
+	}
+
+	database := parts[0]
+
+	if len(parts) == 1 {
+		if r.Method == http.MethodDelete {
+			if err := s.store.DeleteDatabase(database); err != nil {
+				s.handleStoreError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "name": database})
+			return
+		}
+		writeMethodNotAllowed(w, http.MethodDelete)
+		return
+	}
+
+	if parts[1] == "collections" {
+		if len(parts) == 2 {
+			s.handleCollections(w, r, database)
+			return
+		}
+		if len(parts) == 3 && r.Method == http.MethodDelete {
+			collection := parts[2]
+			if err := s.store.DeleteCollection(database, collection); err != nil {
+				s.handleStoreError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "name": collection})
+			return
+		}
+		writeError(w, http.StatusNotFound, "not_found", "route not found")
+		return
+	}
+
+	collection := parts[1]
+	if len(parts) == 2 {
+		s.handleCollectionDocuments(w, r, database, collection)
+		return
+	}
+
+	if len(parts) == 3 {
+		id := parts[2]
+		s.handleDocumentByID(w, r, database, collection, id)
 		return
 	}
 
 	writeError(w, http.StatusNotFound, "not_found", "route not found")
 }
 
-func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDatabases(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		collections, err := s.store.ListCollections()
+		databases, err := s.store.ListDatabases()
 		if err != nil {
 			s.handleStoreError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, collections)
+		writeJSON(w, http.StatusOK, databases)
 	case http.MethodPost:
-		var req createCollectionRequest
+		var req createNameRequest
 		if !s.decodeJSON(w, r, &req) {
 			return
 		}
-		created, err := s.store.CreateCollection(req.Name)
+		created, err := s.store.CreateDatabase(req.Name)
 		if err != nil {
 			s.handleStoreError(w, err)
 			return
@@ -110,48 +160,42 @@ func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleCollectionByName(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		writeMethodNotAllowed(w, http.MethodDelete)
-		return
-	}
-
-	name := strings.TrimPrefix(r.URL.Path, "/api/v1/collections/")
-	if name == "" || strings.Contains(name, "/") {
-		writeError(w, http.StatusNotFound, "not_found", "route not found")
-		return
-	}
-	if err := s.store.DeleteCollection(name); err != nil {
-		s.handleStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"deleted": true,
-		"name":    name,
-	})
-}
-
-func (s *Server) handleDocuments(w http.ResponseWriter, r *http.Request) {
-	parts := routeParts(strings.TrimPrefix(r.URL.Path, "/api/v1/"))
-	if len(parts) < 1 || len(parts) > 2 {
-		writeError(w, http.StatusNotFound, "not_found", "route not found")
-		return
-	}
-
-	collection := parts[0]
-	if len(parts) == 1 {
-		s.handleCollectionDocuments(w, r, collection)
-		return
-	}
-
-	id := parts[1]
-	s.handleDocumentByID(w, r, collection, id)
-}
-
-func (s *Server) handleCollectionDocuments(w http.ResponseWriter, r *http.Request, collection string) {
+func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request, database string) {
 	switch r.Method {
 	case http.MethodGet:
-		documents, err := s.store.ListDocuments(collection)
+		collections, err := s.store.ListCollections(database)
+		if err != nil {
+			s.handleStoreError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, collections)
+	case http.MethodPost:
+		var req createNameRequest
+		if !s.decodeJSON(w, r, &req) {
+			return
+		}
+		created, err := s.store.CreateCollection(database, req.Name)
+		if err != nil {
+			s.handleStoreError(w, err)
+			return
+		}
+		status := http.StatusOK
+		if created {
+			status = http.StatusCreated
+		}
+		writeJSON(w, status, map[string]any{
+			"name":    req.Name,
+			"created": created,
+		})
+	default:
+		writeMethodNotAllowed(w, http.MethodGet, http.MethodPost)
+	}
+}
+
+func (s *Server) handleCollectionDocuments(w http.ResponseWriter, r *http.Request, database, collection string) {
+	switch r.Method {
+	case http.MethodGet:
+		documents, err := s.store.ListDocuments(database, collection)
 		if err != nil {
 			s.handleStoreError(w, err)
 			return
@@ -162,7 +206,7 @@ func (s *Server) handleCollectionDocuments(w http.ResponseWriter, r *http.Reques
 		if !ok {
 			return
 		}
-		document, err := s.store.CreateDocument(collection, body)
+		document, err := s.store.CreateDocument(database, collection, body)
 		if err != nil {
 			s.handleStoreError(w, err)
 			return
@@ -173,10 +217,10 @@ func (s *Server) handleCollectionDocuments(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-func (s *Server) handleDocumentByID(w http.ResponseWriter, r *http.Request, collection, id string) {
+func (s *Server) handleDocumentByID(w http.ResponseWriter, r *http.Request, database, collection, id string) {
 	switch r.Method {
 	case http.MethodGet:
-		document, err := s.store.GetDocument(collection, id)
+		document, err := s.store.GetDocument(database, collection, id)
 		if err != nil {
 			s.handleStoreError(w, err)
 			return
@@ -187,14 +231,14 @@ func (s *Server) handleDocumentByID(w http.ResponseWriter, r *http.Request, coll
 		if !ok {
 			return
 		}
-		document, err := s.store.PutDocument(collection, id, body)
+		document, err := s.store.PutDocument(database, collection, id, body)
 		if err != nil {
 			s.handleStoreError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, document)
 	case http.MethodDelete:
-		if err := s.store.DeleteDocument(collection, id); err != nil {
+		if err := s.store.DeleteDocument(database, collection, id); err != nil {
 			s.handleStoreError(w, err)
 			return
 		}
@@ -306,6 +350,6 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-type createCollectionRequest struct {
+type createNameRequest struct {
 	Name string `json:"name"`
 }

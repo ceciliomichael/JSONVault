@@ -1,15 +1,15 @@
 # JSONVault
 
-JSONVault is a lightweight JSON document database implemented in Go. It stores each collection as a directory and each document as a compact JSON file, while exposing a Bearer-token protected REST API.
+JSONVault is a lightweight JSON document database implemented in Go. It stores each database as a directory, each collection as a subdirectory, and each document as a compact JSON file, while exposing a Bearer-token protected REST API.
 
 ## Features
 
-- File-backed JSON storage with one collection per directory and one document per file
+- File-backed JSON storage with isolated databases, collections, and documents.
 - Atomic document writes through temp-file write, sync, and rename
 - Per-collection read/write locks for concurrent request safety
-- In-memory LRU cache with fixed entry capacity
+- In-memory sharded LRU cache with fixed entry capacity
 - Mandatory API-key authentication using `Authorization: Bearer <key>`
-- JSON-only REST API for collection and document CRUD
+- JSON-only REST API for database, collection, and document CRUD
 - Configurable address, base URL, data directory, cache size, request body limit, and server timeouts
 
 ## Run
@@ -31,32 +31,42 @@ Authorization: Bearer <your-api-key>
 Content-Type: application/json
 ```
 
+Database endpoints:
+
+```http
+POST   /api/v1/databases
+GET    /api/v1/databases
+DELETE /api/v1/{database}
+```
+
+`GET /api/v1/databases` returns a JSON array of database names.
+
 Collection endpoints:
 
 ```http
-POST   /api/v1/collections
-GET    /api/v1/collections
-DELETE /api/v1/collections/{collection}
+POST   /api/v1/{database}/collections
+GET    /api/v1/{database}/collections
+DELETE /api/v1/{database}/collections/{collection}
 ```
 
-`GET /api/v1/collections` returns a JSON array of collection names.
+`GET /api/v1/{database}/collections` returns a JSON array of collection names.
 
 Document endpoints:
 
 ```http
-POST   /api/v1/{collection}
-GET    /api/v1/{collection}
-GET    /api/v1/{collection}/{id}
-PUT    /api/v1/{collection}/{id}
-DELETE /api/v1/{collection}/{id}
+POST   /api/v1/{database}/{collection}
+GET    /api/v1/{database}/{collection}
+GET    /api/v1/{database}/{collection}/{id}
+PUT    /api/v1/{database}/{collection}/{id}
+DELETE /api/v1/{database}/{collection}/{id}
 ```
 
-`GET /api/v1/{collection}` returns a JSON array of documents. Delete operations return JSON confirmation objects.
+`GET /api/v1/{database}/{collection}` returns a JSON array of documents. Delete operations return JSON confirmation objects.
 
 Example:
 
 ```powershell
-curl.exe -X POST http://localhost:8080/api/v1/users `
+curl.exe -X POST http://localhost:8080/api/v1/my_app/users `
   -H "Authorization: Bearer change-this-long-random-secret" `
   -H "Content-Type: application/json" `
   -d '{\"name\":\"Alice\",\"active\":true}'
@@ -70,7 +80,7 @@ A lightweight fetch-based client is available at `clients/javascript/jsonvault-c
 import { JSONVaultClient } from "./clients/javascript/jsonvault-client.js";
 
 const db = new JSONVaultClient("http://localhost:8080", "change-this-long-random-secret");
-const created = await db.createDocument("users", { name: "Alice", active: true });
+const created = await db.createDocument("my_app", "users", { name: "Alice", active: true });
 ```
 
 For production, run JSONVault behind an HTTPS reverse proxy so API keys and payloads are encrypted in transit.

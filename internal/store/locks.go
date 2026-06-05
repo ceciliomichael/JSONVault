@@ -10,7 +10,8 @@ func NewLockManager() *LockManager {
 	return &LockManager{}
 }
 
-func (m *LockManager) For(collection string) *sync.RWMutex {
-	lock, _ := m.locks.LoadOrStore(collection, &sync.RWMutex{})
+func (m *LockManager) For(database, collection string) *sync.RWMutex {
+	key := database + "/" + collection
+	lock, _ := m.locks.LoadOrStore(key, &sync.RWMutex{})
 	return lock.(*sync.RWMutex)
 }

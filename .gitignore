@@ -3,4 +3,3 @@ data/
 *.exe
 *.test
 coverage.out
-clients/

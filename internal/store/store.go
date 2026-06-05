@@ -44,16 +44,80 @@ func New(root string, cacheEntries int) (*Store, error) {
 	return s, nil
 }
 
-func (s *Store) CreateCollection(name string) (bool, error) {
-	if err := ValidateCollectionName(name); err != nil {
+func (s *Store) CreateDatabase(name string) (bool, error) {
+	if err := ValidateDatabaseName(name); err != nil {
 		return false, err
 	}
 
-	lock := s.locks.For(name)
+	path := filepath.Join(s.root, name)
+	_, statErr := os.Stat(path)
+	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return false, fmt.Errorf("inspect database: %w", statErr)
+	}
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return false, fmt.Errorf("create database: %w", err)
+	}
+	return errors.Is(statErr, os.ErrNotExist), nil
+}
+
+func (s *Store) ListDatabases() ([]string, error) {
+	entries, err := os.ReadDir(s.root)
+	if err != nil {
+		return nil, fmt.Errorf("list databases: %w", err)
+	}
+
+	databases := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if err := ValidateDatabaseName(name); err != nil {
+			continue
+		}
+		databases = append(databases, name)
+	}
+	sort.Strings(databases)
+	return databases, nil
+}
+
+func (s *Store) DeleteDatabase(name string) error {
+	if err := ValidateDatabaseName(name); err != nil {
+		return err
+	}
+
+	path := filepath.Join(s.root, name)
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("inspect database: %w", err)
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("delete database: %w", err)
+	}
+	s.cache.DeletePrefix(name + "/")
+	return nil
+}
+
+func (s *Store) CreateCollection(database, collection string) (bool, error) {
+	if err := ValidateDatabaseName(database); err != nil {
+		return false, err
+	}
+	if err := ValidateCollectionName(collection); err != nil {
+		return false, err
+	}
+
+	lock := s.locks.For(database, collection)
 	lock.Lock()
 	defer lock.Unlock()
 
-	path := filepath.Join(s.root, name)
+	dbPath := filepath.Join(s.root, database)
+	if err := os.MkdirAll(dbPath, 0o700); err != nil {
+		return false, fmt.Errorf("create database: %w", err)
+	}
+
+	path := filepath.Join(s.root, database, collection)
 	_, statErr := os.Stat(path)
 	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 		return false, fmt.Errorf("inspect collection: %w", statErr)
@@ -64,9 +128,17 @@ func (s *Store) CreateCollection(name string) (bool, error) {
 	return errors.Is(statErr, os.ErrNotExist), nil
 }
 
-func (s *Store) ListCollections() ([]string, error) {
-	entries, err := os.ReadDir(s.root)
+func (s *Store) ListCollections(database string) ([]string, error) {
+	if err := ValidateDatabaseName(database); err != nil {
+		return nil, err
+	}
+
+	dbPath := filepath.Join(s.root, database)
+	entries, err := os.ReadDir(dbPath)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("list collections: %w", err)
 	}
 
@@ -85,16 +157,19 @@ func (s *Store) ListCollections() ([]string, error) {
 	return collections, nil
 }
 
-func (s *Store) DeleteCollection(name string) error {
-	if err := ValidateCollectionName(name); err != nil {
+func (s *Store) DeleteCollection(database, collection string) error {
+	if err := ValidateDatabaseName(database); err != nil {
+		return err
+	}
+	if err := ValidateCollectionName(collection); err != nil {
 		return err
 	}
 
-	lock := s.locks.For(name)
+	lock := s.locks.For(database, collection)
 	lock.Lock()
 	defer lock.Unlock()
 
-	path := filepath.Join(s.root, name)
+	path := filepath.Join(s.root, database, collection)
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ErrNotFound
@@ -104,11 +179,14 @@ func (s *Store) DeleteCollection(name string) error {
 	if err := os.RemoveAll(path); err != nil {
 		return fmt.Errorf("delete collection: %w", err)
 	}
-	s.cache.DeletePrefix(cachePrefix(name))
+	s.cache.DeletePrefix(cachePrefix(database, collection))
 	return nil
 }
 
-func (s *Store) CreateDocument(collection string, body []byte) (Document, error) {
+func (s *Store) CreateDocument(database, collection string, body []byte) (Document, error) {
+	if err := ValidateDatabaseName(database); err != nil {
+		return Document{}, err
+	}
 	if err := ValidateCollectionName(collection); err != nil {
 		return Document{}, err
 	}
@@ -117,11 +195,11 @@ func (s *Store) CreateDocument(collection string, body []byte) (Document, error)
 		return Document{}, err
 	}
 
-	lock := s.locks.For(collection)
+	lock := s.locks.For(database, collection)
 	lock.Lock()
 	defer lock.Unlock()
 
-	collectionPath := filepath.Join(s.root, collection)
+	collectionPath := filepath.Join(s.root, database, collection)
 	if err := os.MkdirAll(collectionPath, 0o700); err != nil {
 		return Document{}, fmt.Errorf("create collection: %w", err)
 	}
@@ -148,20 +226,23 @@ func (s *Store) CreateDocument(collection string, body []byte) (Document, error)
 	if err := writeAtomic(path, data); err != nil {
 		return Document{}, err
 	}
-	s.cache.Set(cacheKey(collection, id), data)
+	s.cache.Set(cacheKey(database, collection, id), data)
 	return Document{ID: id, Document: json.RawMessage(data)}, nil
 }
 
-func (s *Store) ListDocuments(collection string) ([]Document, error) {
+func (s *Store) ListDocuments(database, collection string) ([]Document, error) {
+	if err := ValidateDatabaseName(database); err != nil {
+		return nil, err
+	}
 	if err := ValidateCollectionName(collection); err != nil {
 		return nil, err
 	}
 
-	lock := s.locks.For(collection)
+	lock := s.locks.For(database, collection)
 	lock.RLock()
 	defer lock.RUnlock()
 
-	collectionPath := filepath.Join(s.root, collection)
+	collectionPath := filepath.Join(s.root, database, collection)
 	entries, err := os.ReadDir(collectionPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -186,7 +267,7 @@ func (s *Store) ListDocuments(collection string) ([]Document, error) {
 
 	documents := make([]Document, 0, len(ids))
 	for _, id := range ids {
-		doc, err := s.readDocumentLocked(collection, id)
+		doc, err := s.readDocumentLocked(database, collection, id)
 		if err != nil {
 			return nil, err
 		}
@@ -195,7 +276,10 @@ func (s *Store) ListDocuments(collection string) ([]Document, error) {
 	return documents, nil
 }
 
-func (s *Store) GetDocument(collection, id string) (Document, error) {
+func (s *Store) GetDocument(database, collection, id string) (Document, error) {
+	if err := ValidateDatabaseName(database); err != nil {
+		return Document{}, err
+	}
 	if err := ValidateCollectionName(collection); err != nil {
 		return Document{}, err
 	}
@@ -203,14 +287,17 @@ func (s *Store) GetDocument(collection, id string) (Document, error) {
 		return Document{}, err
 	}
 
-	lock := s.locks.For(collection)
+	lock := s.locks.For(database, collection)
 	lock.RLock()
 	defer lock.RUnlock()
 
-	return s.readDocumentLocked(collection, id)
+	return s.readDocumentLocked(database, collection, id)
 }
 
-func (s *Store) PutDocument(collection, id string, body []byte) (Document, error) {
+func (s *Store) PutDocument(database, collection, id string, body []byte) (Document, error) {
+	if err := ValidateDatabaseName(database); err != nil {
+		return Document{}, err
+	}
 	if err := ValidateCollectionName(collection); err != nil {
 		return Document{}, err
 	}
@@ -222,11 +309,11 @@ func (s *Store) PutDocument(collection, id string, body []byte) (Document, error
 		return Document{}, err
 	}
 
-	lock := s.locks.For(collection)
+	lock := s.locks.For(database, collection)
 	lock.Lock()
 	defer lock.Unlock()
 
-	path := filepath.Join(s.root, collection, id+".json")
+	path := filepath.Join(s.root, database, collection, id+".json")
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Document{}, ErrNotFound
@@ -236,11 +323,14 @@ func (s *Store) PutDocument(collection, id string, body []byte) (Document, error
 	if err := writeAtomic(path, data); err != nil {
 		return Document{}, err
 	}
-	s.cache.Set(cacheKey(collection, id), data)
+	s.cache.Set(cacheKey(database, collection, id), data)
 	return Document{ID: id, Document: json.RawMessage(data)}, nil
 }
 
-func (s *Store) DeleteDocument(collection, id string) error {
+func (s *Store) DeleteDocument(database, collection, id string) error {
+	if err := ValidateDatabaseName(database); err != nil {
+		return err
+	}
 	if err := ValidateCollectionName(collection); err != nil {
 		return err
 	}
@@ -248,28 +338,28 @@ func (s *Store) DeleteDocument(collection, id string) error {
 		return err
 	}
 
-	lock := s.locks.For(collection)
+	lock := s.locks.For(database, collection)
 	lock.Lock()
 	defer lock.Unlock()
 
-	path := filepath.Join(s.root, collection, id+".json")
+	path := filepath.Join(s.root, database, collection, id+".json")
 	if err := os.Remove(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ErrNotFound
 		}
 		return fmt.Errorf("delete document: %w", err)
 	}
-	s.cache.Delete(cacheKey(collection, id))
+	s.cache.Delete(cacheKey(database, collection, id))
 	return nil
 }
 
-func (s *Store) readDocumentLocked(collection, id string) (Document, error) {
-	key := cacheKey(collection, id)
+func (s *Store) readDocumentLocked(database, collection, id string) (Document, error) {
+	key := cacheKey(database, collection, id)
 	if data, ok := s.cache.Get(key); ok {
 		return Document{ID: id, Document: json.RawMessage(data)}, nil
 	}
 
-	path := filepath.Join(s.root, collection, id+".json")
+	path := filepath.Join(s.root, database, collection, id+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -278,7 +368,7 @@ func (s *Store) readDocumentLocked(collection, id string) (Document, error) {
 		return Document{}, fmt.Errorf("read document: %w", err)
 	}
 	if !json.Valid(data) {
-		return Document{}, fmt.Errorf("%w: stored document %s/%s is corrupt", ErrInvalidJSON, collection, id)
+		return Document{}, fmt.Errorf("%w: stored document %s/%s/%s is corrupt", ErrInvalidJSON, database, collection, id)
 	}
 	s.cache.Set(key, data)
 	return Document{ID: id, Document: json.RawMessage(data)}, nil
@@ -308,12 +398,12 @@ func generateID() (string, error) {
 	return hex.EncodeToString(buf[:]), nil
 }
 
-func cachePrefix(collection string) string {
-	return collection + "/"
+func cachePrefix(database, collection string) string {
+	return database + "/" + collection + "/"
 }
 
-func cacheKey(collection, id string) string {
-	return collection + "/" + id
+func cacheKey(database, collection, id string) string {
+	return database + "/" + collection + "/" + id
 }
 
 func (s *Store) cleanupOrphanedTempFiles() {

@@ -15,7 +15,15 @@ func TestStoreDocumentCRUDPersistsJSON(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	created, err := db.CreateCollection("users")
+	created, err := db.CreateDatabase("testdb")
+	if err != nil {
+		t.Fatalf("CreateDatabase: %v", err)
+	}
+	if !created {
+		t.Fatal("expected database to be created")
+	}
+
+	created, err = db.CreateCollection("testdb", "users")
 	if err != nil {
 		t.Fatalf("CreateCollection: %v", err)
 	}
@@ -23,7 +31,7 @@ func TestStoreDocumentCRUDPersistsJSON(t *testing.T) {
 		t.Fatal("expected collection to be created")
 	}
 
-	doc, err := db.CreateDocument("users", []byte(`{ "name": "Alice", "active": true }`))
+	doc, err := db.CreateDocument("testdb", "users", []byte(`{ "name": "Alice", "active": true }`))
 	if err != nil {
 		t.Fatalf("CreateDocument: %v", err)
 	}
@@ -34,7 +42,7 @@ func TestStoreDocumentCRUDPersistsJSON(t *testing.T) {
 		t.Fatalf("document response is invalid JSON: %s", doc.Document)
 	}
 
-	got, err := db.GetDocument("users", doc.ID)
+	got, err := db.GetDocument("testdb", "users", doc.ID)
 	if err != nil {
 		t.Fatalf("GetDocument: %v", err)
 	}
@@ -42,7 +50,7 @@ func TestStoreDocumentCRUDPersistsJSON(t *testing.T) {
 		t.Fatalf("unexpected compacted document: %s", got.Document)
 	}
 
-	updated, err := db.PutDocument("users", doc.ID, []byte(`{"name":"Alice","active":false}`))
+	updated, err := db.PutDocument("testdb", "users", doc.ID, []byte(`{"name":"Alice","active":false}`))
 	if err != nil {
 		t.Fatalf("PutDocument: %v", err)
 	}
@@ -50,7 +58,7 @@ func TestStoreDocumentCRUDPersistsJSON(t *testing.T) {
 		t.Fatalf("unexpected updated document: %s", updated.Document)
 	}
 
-	documents, err := db.ListDocuments("users")
+	documents, err := db.ListDocuments("testdb", "users")
 	if err != nil {
 		t.Fatalf("ListDocuments: %v", err)
 	}
@@ -58,10 +66,10 @@ func TestStoreDocumentCRUDPersistsJSON(t *testing.T) {
 		t.Fatalf("unexpected document list: %#v", documents)
 	}
 
-	if err := db.DeleteDocument("users", doc.ID); err != nil {
+	if err := db.DeleteDocument("testdb", "users", doc.ID); err != nil {
 		t.Fatalf("DeleteDocument: %v", err)
 	}
-	if _, err := db.GetDocument("users", doc.ID); !errors.Is(err, ErrNotFound) {
+	if _, err := db.GetDocument("testdb", "users", doc.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound after delete, got %v", err)
 	}
 }
@@ -72,11 +80,19 @@ func TestStoreAutoCreatesCollectionOnInsert(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	if _, err := db.CreateDocument("events", []byte(`{"type":"signup"}`)); err != nil {
+	if _, err := db.CreateDocument("testdb", "events", []byte(`{"type":"signup"}`)); err != nil {
 		t.Fatalf("CreateDocument: %v", err)
 	}
 
-	collections, err := db.ListCollections()
+	databases, err := db.ListDatabases()
+	if err != nil {
+		t.Fatalf("ListDatabases: %v", err)
+	}
+	if len(databases) != 1 || databases[0] != "testdb" {
+		t.Fatalf("unexpected databases: %#v", databases)
+	}
+
+	collections, err := db.ListCollections("testdb")
 	if err != nil {
 		t.Fatalf("ListCollections: %v", err)
 	}
@@ -91,16 +107,22 @@ func TestStoreRejectsInvalidNamesAndJSON(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	if _, err := db.CreateDocument("../users", []byte(`{"ok":true}`)); !errors.Is(err, ErrInvalidName) {
+	if _, err := db.CreateDocument("../testdb", "users", []byte(`{"ok":true}`)); !errors.Is(err, ErrInvalidName) {
+		t.Fatalf("expected invalid database name, got %v", err)
+	}
+	if _, err := db.CreateDocument("databases", "users", []byte(`{"ok":true}`)); !errors.Is(err, ErrReservedName) {
+		t.Fatalf("expected reserved database name, got %v", err)
+	}
+	if _, err := db.CreateDocument("testdb", "../users", []byte(`{"ok":true}`)); !errors.Is(err, ErrInvalidName) {
 		t.Fatalf("expected invalid collection name, got %v", err)
 	}
-	if _, err := db.CreateDocument("collections", []byte(`{"ok":true}`)); !errors.Is(err, ErrReservedName) {
+	if _, err := db.CreateDocument("testdb", "collections", []byte(`{"ok":true}`)); !errors.Is(err, ErrReservedName) {
 		t.Fatalf("expected reserved collection name, got %v", err)
 	}
-	if _, err := db.CreateDocument("users", []byte(`not-json`)); !errors.Is(err, ErrInvalidJSON) {
+	if _, err := db.CreateDocument("testdb", "users", []byte(`not-json`)); !errors.Is(err, ErrInvalidJSON) {
 		t.Fatalf("expected invalid JSON, got %v", err)
 	}
-	if _, err := db.CreateDocument("users", nil); !errors.Is(err, ErrEmptyDocument) {
+	if _, err := db.CreateDocument("testdb", "users", nil); !errors.Is(err, ErrEmptyDocument) {
 		t.Fatalf("expected empty document error, got %v", err)
 	}
 }
@@ -112,16 +134,16 @@ func TestFailedUpdateLeavesOriginalFile(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	doc, err := db.CreateDocument("users", []byte(`{"version":1}`))
+	doc, err := db.CreateDocument("testdb", "users", []byte(`{"version":1}`))
 	if err != nil {
 		t.Fatalf("CreateDocument: %v", err)
 	}
 
-	if _, err := db.PutDocument("users", doc.ID, []byte(`{"version":`)); !errors.Is(err, ErrInvalidJSON) {
+	if _, err := db.PutDocument("testdb", "users", doc.ID, []byte(`{"version":`)); !errors.Is(err, ErrInvalidJSON) {
 		t.Fatalf("expected invalid JSON, got %v", err)
 	}
 
-	path := filepath.Join(root, "users", doc.ID+".json")
+	path := filepath.Join(root, "testdb", "users", doc.ID+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
@@ -144,7 +166,7 @@ func TestStoreConcurrentCreatesStayValid(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := db.CreateDocument("events", []byte(`{"type":"signup"}`))
+			_, err := db.CreateDocument("testdb", "events", []byte(`{"type":"signup"}`))
 			errs <- err
 		}()
 	}
@@ -157,7 +179,7 @@ func TestStoreConcurrentCreatesStayValid(t *testing.T) {
 		}
 	}
 
-	documents, err := db.ListDocuments("events")
+	documents, err := db.ListDocuments("testdb", "events")
 	if err != nil {
 		t.Fatalf("ListDocuments: %v", err)
 	}
