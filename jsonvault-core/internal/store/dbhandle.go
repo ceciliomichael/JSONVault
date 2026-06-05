@@ -17,7 +17,7 @@ const (
 type DBHandle struct {
 	db       *bolt.DB
 	state    dbState
-	wg       sync.WaitGroup
+	gate     sync.RWMutex
 	mu       sync.RWMutex
 	lastUsed time.Time
 }
@@ -28,10 +28,10 @@ func (h *DBHandle) View(fn func(*bolt.Tx) error) error {
 		h.mu.RUnlock()
 		return ErrNotFound
 	}
-	h.wg.Add(1)
+	h.gate.RLock()
 	h.mu.RUnlock()
 	
-	defer h.wg.Done()
+	defer h.gate.RUnlock()
 	return h.db.View(fn)
 }
 
@@ -41,9 +41,9 @@ func (h *DBHandle) Update(fn func(*bolt.Tx) error) error {
 		h.mu.RUnlock()
 		return ErrNotFound
 	}
-	h.wg.Add(1)
+	h.gate.RLock()
 	h.mu.RUnlock()
 	
-	defer h.wg.Done()
+	defer h.gate.RUnlock()
 	return h.db.Update(fn)
 }

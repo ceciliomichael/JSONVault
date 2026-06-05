@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/bytedance/sonic"
 	bolt "go.etcd.io/bbolt"
@@ -12,6 +13,43 @@ const (
 	indexesMetaBucketPrefix = "_indexes_meta"
 	indexBucketPrefix       = "_idx"
 )
+
+func encodeIndexValue(val interface{}) string {
+	switch v := val.(type) {
+	case string:
+		return "s:" + v
+	case bool:
+		if v {
+			return "b:true"
+		}
+		return "b:false"
+	case float64:
+		return "n:" + strconv.FormatFloat(v, 'f', -1, 64)
+	case nil:
+		return "z:null"
+	default:
+		return "u:" + fmt.Sprintf("%v", v)
+	}
+}
+
+func parseFilterValue(s string) interface{} {
+	if s == "true" {
+		return true
+	}
+	if s == "false" {
+		return false
+	}
+	if s == "null" {
+		return nil
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return f
+	}
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
 
 // getIndexesMetaBucketName returns the metadata bucket name
 func getIndexesMetaBucketName() []byte {
@@ -83,6 +121,12 @@ func (s *Store) CreateIndex(database, collection, field string) error {
 	}
 
 	return db.Update(func(tx *bolt.Tx) error {
+		// Ensure collection exists
+		colBucket := tx.Bucket([]byte(collection))
+		if colBucket == nil {
+			return ErrNotFound
+		}
+
 		// 1. Update metadata
 		metaBucket, err := tx.CreateBucketIfNotExists(getIndexesMetaBucketName())
 		if err != nil {
@@ -120,11 +164,6 @@ func (s *Store) CreateIndex(database, collection, field string) error {
 		}
 
 		// 3. Backfill index with existing documents
-		colBucket := tx.Bucket([]byte(collection))
-		if colBucket == nil {
-			return nil // Collection doesn't exist yet, nothing to backfill
-		}
-
 		c := colBucket.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			// Decrypt if necessary
@@ -143,7 +182,7 @@ func (s *Store) CreateIndex(database, collection, field string) error {
 				continue
 			}
 
-			strVal := fmt.Sprintf("%v", val)
+			strVal := encodeIndexValue(val)
 			
 			// Get or create nested bucket for this specific value
 			valBucket, err := idxBucket.CreateBucketIfNotExists([]byte(strVal))
@@ -259,7 +298,7 @@ func indexDocumentTx(tx *bolt.Tx, collection, docID string, doc []byte) error {
 		if !exists {
 			continue
 		}
-		strVal := fmt.Sprintf("%v", val)
+		strVal := encodeIndexValue(val)
 
 		idxBucketName := getIndexBucketName(collection, field)
 		idxBucket := tx.Bucket(idxBucketName)
@@ -295,7 +334,7 @@ func unindexDocumentTx(tx *bolt.Tx, collection, docID string, oldDoc []byte) err
 		if !exists {
 			continue
 		}
-		strVal := fmt.Sprintf("%v", val)
+		strVal := encodeIndexValue(val)
 
 		idxBucketName := getIndexBucketName(collection, field)
 		idxBucket := tx.Bucket(idxBucketName)

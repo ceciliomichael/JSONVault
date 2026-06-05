@@ -59,27 +59,29 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 	r.Use(gin.Recovery())
 	r.Use(MetricsMiddleware())
 
-	if authenticator != nil {
-		r.Use(func(c *gin.Context) {
-			if c.Request.URL.Path == "/healthz" {
-				c.Next()
-				return
-			}
-			ok, scope := authenticator.Authenticate(c.GetHeader("Authorization"))
-			if !ok {
-				c.Header("WWW-Authenticate", `Bearer realm="jsonvault"`)
-				c.AbortWithStatusJSON(http.StatusUnauthorized, map[string]any{
-					"error": map[string]string{
-						"code":    "unauthorized",
-						"message": "missing or invalid bearer token",
-					},
-				})
-				return
-			}
-			c.Set("scope", scope)
-			c.Next()
-		})
+	if authenticator == nil {
+		panic("NewHandler requires a non-nil authenticator. For testing, use NewUnauthenticatedHandler.")
 	}
+
+	r.Use(func(c *gin.Context) {
+		if c.Request.URL.Path == "/healthz" {
+			c.Next()
+			return
+		}
+		ok, scope := authenticator.Authenticate(c.GetHeader("Authorization"))
+		if !ok {
+			c.Header("WWW-Authenticate", `Bearer realm="jsonvault"`)
+			c.AbortWithStatusJSON(http.StatusUnauthorized, map[string]any{
+				"error": map[string]string{
+					"code":    "unauthorized",
+					"message": "missing or invalid bearer token",
+				},
+			})
+			return
+		}
+		c.Set("scope", scope)
+		c.Next()
+	})
 
 	r.Use(func(c *gin.Context) {
 		c.Header("X-Content-Type-Options", "nosniff")
@@ -97,6 +99,58 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 	{
 		v1.GET("/admin/backup/:database", server.handleBackupDatabase)
 
+		v1.GET("/databases", server.handleDatabases)
+		v1.POST("/databases", server.handleDatabases)
+		v1.DELETE("/:database", server.handleDeleteDatabase)
+
+		v1.GET("/:database/collections", server.handleCollections)
+		v1.POST("/:database/collections", server.handleCollections)
+		v1.DELETE("/:database/collections/:collection", server.handleDeleteCollection)
+
+		v1.GET("/:database/:collection", server.handleCollectionDocuments)
+		v1.POST("/:database/:collection", server.handleCollectionDocuments)
+
+		v1.GET("/:database/:collection/indexes", server.handleListIndexes)
+		v1.POST("/:database/:collection/indexes", server.handleCreateIndex)
+		v1.DELETE("/:database/:collection/indexes/:field", server.handleDeleteIndex)
+
+		v1.GET("/:database/:collection/:id", server.handleDocumentByID)
+		v1.PUT("/:database/:collection/:id", server.handleDocumentByID)
+		v1.PATCH("/:database/:collection/:id", server.handleDocumentByID)
+		v1.DELETE("/:database/:collection/:id", server.handleDocumentByID)
+	}
+
+	return r
+}
+
+// NewUnauthenticatedHandler is for internal tests only. It bypasses auth entirely.
+func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
+	maxBodyBytes := options.MaxBodyBytes
+	if maxBodyBytes < 1 {
+		maxBodyBytes = defaultMaxBodyBytes
+	}
+
+	server := &Server{
+		store:        db,
+		maxBodyBytes: maxBodyBytes,
+	}
+
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+	r.Use(gin.Recovery())
+
+	r.Use(func(c *gin.Context) {
+		// Mock admin scope for tests
+		c.Set("scope", auth.ScopeAdmin)
+		c.Next()
+	})
+
+	r.GET("/healthz", func(c *gin.Context) {
+		c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	})
+
+	v1 := r.Group("/api/v1")
+	{
 		v1.GET("/databases", server.handleDatabases)
 		v1.POST("/databases", server.handleDatabases)
 		v1.DELETE("/:database", server.handleDeleteDatabase)

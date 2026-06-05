@@ -100,6 +100,22 @@ func (s *Store) DeleteCollection(database, collection string) error {
 		if tx.Bucket([]byte(collection)) == nil {
 			return ErrNotFound
 		}
+
+		// Clean up index buckets
+		indexes := getIndexedFieldsTx(tx, collection)
+		for _, field := range indexes {
+			idxBucketName := getIndexBucketName(collection, field)
+			if tx.Bucket(idxBucketName) != nil {
+				_ = tx.DeleteBucket(idxBucketName)
+			}
+		}
+
+		// Clean up index metadata
+		metaBucket := tx.Bucket(getIndexesMetaBucketName())
+		if metaBucket != nil {
+			_ = metaBucket.Delete([]byte(collection))
+		}
+
 		return tx.DeleteBucket([]byte(collection))
 	})
 

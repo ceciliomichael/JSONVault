@@ -1,118 +1,91 @@
-# JSONVault Integration Guide
+# JSONVault Client Integration Guide
 
-JSONVault is a high-performance NoSQL document database accessed via REST API. It uses the `bbolt` embedded storage engine under the hood, organizing data into a strict 3-tier hierarchy: **Database -> Collection -> Document**.
+JSONVault is a high-performance NoSQL document database accessed via a REST API. Data is organized into a strict 3-tier hierarchy: **Database -> Collection -> Document**.
 
-This document serves as the definitive guide for integrating JSONVault. AI Agents and integrations must adhere strictly to these endpoint definitions, configurations, and schemas.
+This guide is designed for developers integrating their applications with a JSONVault instance. It covers the required configurations, concepts, and the complete API reference.
 
 ## Configuration & Setup
 
-When connecting to JSONVault from your client application, it is highly recommended to store your credentials and database references in your project's `.env` file to prevent hardcoding. 
+When connecting to JSONVault from your client application, store your credentials and connection strings in your project's `.env` file to prevent hardcoding secrets in your source code.
 
 ```env
-# The URL where JSONVault is hosted
+# The URL where the JSONVault instance is hosted
 JSONVAULT_BASE_URL=http://localhost:8080
 
-# The Bearer Token API Key for authorization. 
-# Supports Scopes via colon: secret_key:admin, other_key:read_only
-JSONVAULT_API_KEYS=your-secret-api-key:admin,another-key:read_only
+# Your API Key for authorization
+JSONVAULT_API_KEY=your-secret-api-key
 
-# The name of your isolated database project (used in routes)
+# The name of your database project
 JSONVAULT_DATABASE_NAME=my_app_db
 ```
 
-Your application can read these environment variables to construct the appropriate REST API requests. For example, a request to list users would map to:
+Your application should read these environment variables to construct the appropriate REST API requests. For example, a request to list users would map to:
 `${JSONVAULT_BASE_URL}/api/v1/${JSONVAULT_DATABASE_NAME}/users`
 
 ## Core Concepts
-- **Database**: Top-level isolated container (e.g., `ecommerce_db`).
-- **Collection**: Grouping of documents within a Database (e.g., `users`).
+- **Database**: Top-level isolated container (e.g., `ecommerce_db`). Databases are created automatically on first document insert.
+- **Collection**: Grouping of documents within a Database (e.g., `users`). Collections are created automatically on first document insert.
 - **Document**: JSON object containing user data, identified by an auto-generated `id`.
 
-## Required Headers
-All requests (except `/healthz`) MUST include the following headers to prevent `401 Unauthorized` or `415 Unsupported Media Type` errors:
+## Authentication & Headers
+All requests (except `/healthz`) MUST include the following headers:
 ```http
 Authorization: Bearer <your-api-key>
 Content-Type: application/json
 ```
-*(Note: `Content-Type` is only strictly required for `POST`, `PUT`, and `PATCH` requests).*
+*(Note: `Content-Type` is strictly required for `POST`, `PUT`, and `PATCH` requests).*
 
-### Scoped Auth (RBAC)
-JSONVault API keys can be restricted to specific scopes by defining them in the `JSONVAULT_API_KEYS` env variable with a `:scope` suffix (e.g. `secret_key:read_only`). Existing keys without a colon default to `admin`.
-- `admin`: Full access to everything, including dropping databases.
-- `read_write`: Can view, create, modify, and delete documents and collections, but cannot drop databases.
-- `read_only`: Can only fetch documents and list databases/collections.
+Your API Key's access level (e.g., Admin, Read/Write, Read-Only) is managed by the JSONVault server administrator. If you receive a `403 Forbidden` error, you may not have the required permissions for that operation.
 
-### Optimistic Concurrency Control (ETags)
-To prevent silent lost updates during concurrent edits, all document reads return an `ETag` header. When performing a `PUT`, `PATCH`, or `DELETE`, you may optionally provide this value in the `If-Match` header. If the document has been modified since you read it, the server will return `412 Precondition Failed`.
+## Optimistic Concurrency Control (ETags)
+To prevent silent lost updates during concurrent edits, all document reads return an `ETag` header. When performing a `PUT`, `PATCH`, or `DELETE`, you may optionally provide this value in the `If-Match` header. If the document has been modified since you read it, the server will reject your request with `412 Precondition Failed`.
 
 ---
 
-## 1. Health
-Checks if the server is running. No authentication required.
+## API Reference
+
+### 1. Health
+Checks if the database server is reachable.
 - **Request:** `GET /healthz`
 - **Response (200 OK):** `{"status": "ok"}`
 
----
+### 2. Databases
 
-## 2. Databases
-*Note: Databases are automatically created when the first document is inserted into them.*
-
-### List Databases
+#### List Databases
 - **Request:** `GET /api/v1/databases`
-- **Response (200 OK):** Array of strings.
-  ```json
-  ["ecommerce_db", "blog_db"]
-  ```
+- **Response (200 OK):** `["ecommerce_db", "blog_db"]`
 
-### Create Database
-- **Request:** `POST /api/v1/databases`
-- **Body:** `{"name": "<database_name>"}`
-- **Response (200/201):** `{"name": "<database_name>", "created": true}`
-
-### Delete Database
+#### Delete Database
+*(Requires Admin permissions)*
 - **Request:** `DELETE /api/v1/{database}`
 - **Response (200 OK):** `{"deleted": true, "name": "{database}"}`
 
----
+### 3. Collections
 
-## 3. Collections
-*Note: Collections are automatically created when the first document is inserted into them.*
-
-### List Collections
+#### List Collections
 - **Request:** `GET /api/v1/{database}/collections`
-- **Response (200 OK):** Array of strings.
-  ```json
-  ["users", "products"]
-  ```
+- **Response (200 OK):** `["users", "products"]`
 
-### Create Collection
-- **Request:** `POST /api/v1/{database}/collections`
-- **Body:** `{"name": "<collection_name>"}`
-- **Response (200/201):** `{"name": "<collection_name>", "created": true}`
-
-### Delete Collection
+#### Delete Collection
 - **Request:** `DELETE /api/v1/{database}/collections/{collection}`
 - **Response (200 OK):** `{"deleted": true, "name": "{collection}"}`
 
----
+### 4. Documents
 
-## 4. Documents
-
-### List Documents
+#### List Documents
 - **Request:** `GET /api/v1/{database}/{collection}`
   - **Query Parameters:**
     - `limit` (int, default: 100, max: 1000): Number of documents to return.
     - `offset` (int, default: 0, max: 10000): Number of documents to skip.
-    - `filter[<field>]` (string): Filter documents where `<field>` matches the provided value exactly (e.g., `?filter[active]=true`). Max 5 filters per query.
-- **Response (200 OK):** Array of document objects. Pagination metadata is returned in response headers (`X-Total-Count`, `X-Limit`, `X-Offset`).
+    - `filter[<field>]` (string): Filter documents by exact match (e.g., `?filter[active]=true`, `?filter[age]=30`). Max 5 filters per query.
+- **Response (200 OK):** Pagination metadata is returned in response headers (`X-Total-Count`, `X-Limit`, `X-Offset`).
   ```json
   [
-    { "id": "12345", "document": { "key": "value" } },
-    { "id": "67890", "document": { "key": "value" } }
+    { "id": "12345", "document": { "key": "value" } }
   ]
   ```
 
-### Create Document
+#### Create Document
 - **Request:** `POST /api/v1/{database}/{collection}`
 - **Body:** Any valid JSON object.
 - **Response (201 Created):**
@@ -123,7 +96,7 @@ Checks if the server is running. No authentication required.
   }
   ```
 
-### Get Document by ID
+#### Get Document by ID
 - **Request:** `GET /api/v1/{database}/{collection}/{id}`
 - **Response (200 OK):**
   ```json
@@ -133,7 +106,7 @@ Checks if the server is running. No authentication required.
   }
   ```
 
-### Update Document
+#### Update Document (Replace)
 - **Request:** `PUT /api/v1/{database}/{collection}/{id}`
 - **Headers (Optional):** `If-Match: <etag>`
 - **Body:** Any valid JSON object. *(This operation completely overwrites the existing document).*
@@ -145,10 +118,10 @@ Checks if the server is running. No authentication required.
   }
   ```
 
-### Partial Update Document
+#### Partial Update Document (Merge)
 - **Request:** `PATCH /api/v1/{database}/{collection}/{id}`
 - **Headers (Optional):** `If-Match: <etag>`
-- **Body:** Any valid JSON object containing fields to merge. *(This operation updates specific fields while preserving the rest of the document).*
+- **Body:** Any valid JSON object containing fields to merge. *(Updates specific fields while preserving the rest).*
 - **Response (200 OK):**
   ```json
   {
@@ -157,7 +130,7 @@ Checks if the server is running. No authentication required.
   }
   ```
 
-### Delete Document
+#### Delete Document
 - **Request:** `DELETE /api/v1/{database}/{collection}/{id}`
 - **Headers (Optional):** `If-Match: <etag>`
 - **Response (200 OK):**
@@ -185,7 +158,7 @@ Standard JSON error response format across all endpoints:
 **Common HTTP Status Codes:**
 - `400 Bad Request`: Invalid JSON payload, missing filters, or offset too large.
 - `401 Unauthorized`: Missing or invalid Bearer token.
-- `403 Forbidden`: API Key does not have the required scope.
+- `403 Forbidden`: API Key does not have the required permissions for this action.
 - `404 Not Found`: Target resource does not exist.
 - `405 Method Not Allowed`: HTTP verb not supported on this endpoint.
 - `412 Precondition Failed`: ETag provided in `If-Match` does not match current document.

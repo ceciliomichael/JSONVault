@@ -54,7 +54,7 @@ func (s *Store) ListDocuments(database, collection string, limit, offset int, fi
 			for _, idx := range indexes {
 				if val, ok := filter[idx]; ok {
 					indexedField = idx
-					indexedValue = val
+					indexedValue = encodeIndexValue(parseFilterValue(val))
 					break
 				}
 			}
@@ -92,7 +92,7 @@ func (s *Store) ListDocuments(database, collection string, limit, offset int, fi
 										continue
 									}
 									val, exists := parsed[fk]
-									if !exists || fmt.Sprintf("%v", val) != fv {
+									if !exists || encodeIndexValue(val) != encodeIndexValue(parseFilterValue(fv)) {
 										matches = false
 										break
 									}
@@ -136,7 +136,7 @@ func (s *Store) ListDocuments(database, collection string, limit, offset int, fi
 					if err := sonic.Unmarshal(plaintext, &parsed); err == nil {
 						for fk, fv := range filter {
 							val, exists := parsed[fk]
-							if !exists || fmt.Sprintf("%v", val) != fv {
+							if !exists || encodeIndexValue(val) != encodeIndexValue(parseFilterValue(fv)) {
 								matches = false
 								break
 							}

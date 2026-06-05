@@ -63,12 +63,13 @@ func (s *Store) Close() error {
 	defer s.mu.Unlock()
 	var errs []string
 	for name, h := range s.dbs {
-		h.wg.Wait()
+		h.gate.Lock()
 		if h.db != nil {
 			if err := h.db.Close(); err != nil {
 				errs = append(errs, fmt.Sprintf("close %s: %v", name, err))
 			}
 		}
+		h.gate.Unlock()
 	}
 	s.dbs = make(map[string]*DBHandle)
 	if len(errs) > 0 {
@@ -126,10 +127,11 @@ func (s *Store) getDB(database string) (*DBHandle, error) {
 				oldHandle.mu.Lock()
 				oldHandle.state = stateDeleting
 				oldHandle.mu.Unlock()
-				oldHandle.wg.Wait()
+				oldHandle.gate.Lock()
 				if oldHandle.db != nil {
 					oldHandle.db.Close()
 				}
+				oldHandle.gate.Unlock()
 			}()
 		}
 	}

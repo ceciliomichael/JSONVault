@@ -77,8 +77,9 @@ func (s *Store) DeleteDatabase(name string) error {
 	s.mu.Unlock()
 
 	if h.db != nil {
-		h.wg.Wait()
+		h.gate.Lock()
 		h.db.Close()
+		h.gate.Unlock()
 	}
 
 	err := os.Remove(path)
