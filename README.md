@@ -17,5 +17,5 @@ JSONVault is perfect for developers, startups, and hobbyists who want the power 
 
 ## Where to start?
 If you're a developer ready to plug your app into JSONVault, check out the documentation:
-- **[Client Integration Guide](../docs/integration-guide.md):** Learn how to connect your app, save data, and fetch it.
-- **[Server Guide](../docs/server-guide.md):** Learn how to host JSONVault, manage API keys, and configure the engine.
+- **[Client Integration Guide](./docs/integration-guide.md):** Learn how to connect your app, save data, and fetch it.
+- **[Server Guide](./docs/server-guide.md):** Learn how to host JSONVault, manage API keys, and configure the engine.
