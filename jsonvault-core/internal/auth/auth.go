@@ -11,18 +11,42 @@ import (
 
 var ErrNoAPIKeys = errors.New("at least one API key is required")
 
+type Scope string
+
+const (
+	ScopeAdmin Scope = "admin"
+	ScopeReadWrite Scope = "read_write"
+	ScopeReadOnly  Scope = "read_only"
+)
+
+type keyHash struct {
+	hash  [sha256.Size]byte
+	scope Scope
+}
+
 type Authenticator struct {
-	keyHashes [][sha256.Size]byte
+	keyHashes []keyHash
 }
 
 func New(keys []string) (*Authenticator, error) {
-	hashes := make([][sha256.Size]byte, 0, len(keys))
-	for _, key := range keys {
-		key = strings.TrimSpace(key)
-		if key == "" {
+	hashes := make([]keyHash, 0, len(keys))
+	for _, keyStr := range keys {
+		keyStr = strings.TrimSpace(keyStr)
+		if keyStr == "" {
 			continue
 		}
-		hashes = append(hashes, sha256.Sum256([]byte(key)))
+		
+		parts := strings.SplitN(keyStr, ":", 2)
+		key := parts[0]
+		scope := ScopeAdmin
+		if len(parts) == 2 {
+			scope = Scope(parts[1])
+		}
+
+		hashes = append(hashes, keyHash{
+			hash:  sha256.Sum256([]byte(key)),
+			scope: scope,
+		})
 	}
 	if len(hashes) == 0 {
 		return nil, ErrNoAPIKeys
@@ -30,22 +54,23 @@ func New(keys []string) (*Authenticator, error) {
 	return &Authenticator{keyHashes: hashes}, nil
 }
 
-func (a *Authenticator) Authenticate(header string) bool {
+func (a *Authenticator) Authenticate(header string) (bool, Scope) {
 	scheme, token, ok := strings.Cut(strings.TrimSpace(header), " ")
 	if !ok || !strings.EqualFold(scheme, "Bearer") {
-		return false
+		return false, ""
 	}
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return false
+		return false, ""
 	}
 
 	candidate := sha256.Sum256([]byte(token))
-	match := 0
-	for _, keyHash := range a.keyHashes {
-		match |= subtle.ConstantTimeCompare(candidate[:], keyHash[:])
+	for _, kh := range a.keyHashes {
+		if subtle.ConstantTimeCompare(candidate[:], kh.hash[:]) == 1 {
+			return true, kh.scope
+		}
 	}
-	return match == 1
+	return false, ""
 }
 
 func (a *Authenticator) Middleware(next http.Handler) http.Handler {
@@ -55,7 +80,8 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if !a.Authenticate(r.Header.Get("Authorization")) {
+		ok, scope := a.Authenticate(r.Header.Get("Authorization"))
+		if !ok {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("WWW-Authenticate", `Bearer realm="jsonvault"`)
 			w.WriteHeader(http.StatusUnauthorized)
@@ -67,6 +93,8 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			})
 			return
 		}
+		
+		r.Header.Set("X-API-Scope", string(scope))
 		next.ServeHTTP(w, r)
 	})
 }

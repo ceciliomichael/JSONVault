@@ -20,7 +20,7 @@ func TestAuthenticatorRequiresBearerToken(t *testing.T) {
 	}
 
 	for header, want := range tests {
-		if got := authenticator.Authenticate(header); got != want {
+		if got, _ := authenticator.Authenticate(header); got != want {
 			t.Fatalf("Authenticate(%q) = %v, want %v", header, got, want)
 		}
 	}

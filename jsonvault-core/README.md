@@ -1,16 +1,16 @@
 # JSONVault
 
-JSONVault is a lightweight JSON document database implemented in Go. It stores each database as a directory, each collection as a subdirectory, and each document as a compact JSON file, while exposing a Bearer-token protected REST API.
+JSONVault is a high-performance JSON document database implemented in Go. It uses the `bbolt` embedded storage engine, storing each database as a single `.db` file, each collection as a bucket, and each document as a compact JSON value, while exposing a Bearer-token protected REST API.
 
 ## Features
 
-- File-backed JSON storage with isolated databases, collections, and documents.
-- Atomic document writes through temp-file write, sync, and rename
-- Per-collection read/write locks for concurrent request safety
-- In-memory sharded LRU cache with fixed entry capacity
-- Mandatory API-key authentication using `Authorization: Bearer <key>`
-- JSON-only REST API for database, collection, and document CRUD
-- Configurable address, base URL, data directory, cache size, request body limit, and server timeouts
+- High-performance `bbolt` embedded Key-Value engine for data storage.
+- Native ACID transactions and file-level locking with Safe Deletion tracking.
+- Fast memory-mapped (mmap) reads with hard Query Limits to prevent OOM exhaustion.
+- Scoped API-key authentication (RBAC) via `JSONVAULT_API_KEYS`.
+- Optimistic Concurrency Control using `ETag` and `If-Match` headers to prevent lost updates.
+- JSON-only REST API for database, collection, and document CRUD.
+- Configurable address, base URL, data directory, request body limit, and server timeouts.
 
 ## Run
 

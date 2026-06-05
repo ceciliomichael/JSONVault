@@ -2,11 +2,13 @@ package httpapi
 
 import (
 	"net/http"
+	"io"
 
 	"github.com/gin-gonic/gin"
 	
 	"jsonvault/internal/auth"
 	"jsonvault/internal/store"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const defaultMaxBodyBytes int64 = 10 * 1024 * 1024
@@ -21,9 +23,10 @@ type Store interface {
 	CreateDocument(database, collection string, body []byte) (store.Document, error)
 	ListDocuments(database, collection string, limit, offset int, filter map[string]string) ([]store.Document, int, error)
 	GetDocument(database, collection, id string) (store.Document, error)
-	PutDocument(database, collection, id string, body []byte) (store.Document, error)
-	PatchDocument(database, collection, id string, body []byte) (store.Document, error)
-	DeleteDocument(database, collection, id string) error
+	PutDocument(database, collection, id string, body []byte, expectedETag string) (store.Document, error)
+	PatchDocument(database, collection, id string, body []byte, expectedETag string) (store.Document, error)
+	DeleteDocument(database, collection, id string, expectedETag string) error
+	BackupDatabase(database string, w io.Writer) error
 }
 
 type Options struct {
@@ -49,6 +52,7 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(MetricsMiddleware())
 
 	if authenticator != nil {
 		r.Use(func(c *gin.Context) {
@@ -56,7 +60,8 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 				c.Next()
 				return
 			}
-			if !authenticator.Authenticate(c.GetHeader("Authorization")) {
+			ok, scope := authenticator.Authenticate(c.GetHeader("Authorization"))
+			if !ok {
 				c.Header("WWW-Authenticate", `Bearer realm="jsonvault"`)
 				c.AbortWithStatusJSON(http.StatusUnauthorized, map[string]any{
 					"error": map[string]string{
@@ -66,6 +71,7 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 				})
 				return
 			}
+			c.Set("scope", scope)
 			c.Next()
 		})
 	}
@@ -80,8 +86,12 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 		c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	})
 
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
 	v1 := r.Group("/api/v1")
 	{
+		v1.GET("/admin/backup/:database", server.handleBackupDatabase)
+
 		v1.GET("/databases", server.handleDatabases)
 		v1.POST("/databases", server.handleDatabases)
 		v1.DELETE("/:database", server.handleDeleteDatabase)
@@ -102,7 +112,33 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 	return r
 }
 
+func (s *Server) hasScope(c *gin.Context, required auth.Scope) bool {
+	val, exists := c.Get("scope")
+	if !exists {
+		return true // Auth disabled
+	}
+	scope, ok := val.(auth.Scope)
+	if !ok {
+		return false
+	}
+	
+	switch scope {
+	case auth.ScopeAdmin:
+		return true
+	case auth.ScopeReadWrite:
+		return required == auth.ScopeReadWrite || required == auth.ScopeReadOnly
+	case auth.ScopeReadOnly:
+		return required == auth.ScopeReadOnly
+	default:
+		return false
+	}
+}
+
 func (s *Server) handleDeleteDatabase(c *gin.Context) {
+	if !s.hasScope(c, auth.ScopeAdmin) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
 	database := c.Param("database")
 	if err := s.store.DeleteDatabase(database); err != nil {
 		s.handleStoreError(c, err)
@@ -112,6 +148,10 @@ func (s *Server) handleDeleteDatabase(c *gin.Context) {
 }
 
 func (s *Server) handleDeleteCollection(c *gin.Context) {
+	if !s.hasScope(c, auth.ScopeReadWrite) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
 	database := c.Param("database")
 	collection := c.Param("collection")
 	if err := s.store.DeleteCollection(database, collection); err != nil {
@@ -119,4 +159,21 @@ func (s *Server) handleDeleteCollection(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, map[string]any{"deleted": true, "name": collection})
+}
+
+func (s *Server) handleBackupDatabase(c *gin.Context) {
+	if !s.hasScope(c, auth.ScopeAdmin) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	
+	database := c.Param("database")
+	c.Header("Content-Type", "application/octet-stream")
+	c.Header("Content-Disposition", `attachment; filename="`+database+`.db"`)
+	
+	if err := s.store.BackupDatabase(database, c.Writer); err != nil {
+		// Cannot send JSON error if we already started writing headers/body
+		// We can just log or abort
+		c.AbortWithError(http.StatusInternalServerError, err)
+	}
 }

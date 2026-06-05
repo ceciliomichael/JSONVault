@@ -20,6 +20,10 @@ func (s *Store) CreateDocument(database, collection string, body []byte) (Docume
 	if err != nil {
 		return Document{}, err
 	}
+	encryptedData, err := encryptDocument(data, s.encryptionKey)
+	if err != nil {
+		return Document{}, err
+	}
 
 	db, err := s.getDB(database)
 	if err != nil {
@@ -46,17 +50,17 @@ func (s *Store) CreateDocument(database, collection string, body []byte) (Docume
 			}
 		}
 
-		return b.Put([]byte(id), data)
+		return b.Put([]byte(id), encryptedData)
 	})
 
 	if err != nil {
 		return Document{}, fmt.Errorf("create document: %w", err)
 	}
 
-	return Document{ID: id, Document: stdjson.RawMessage(data)}, nil
+	return Document{ID: id, Document: stdjson.RawMessage(data), ETag: computeETag(data)}, nil
 }
 
-func (s *Store) PutDocument(database, collection, id string, body []byte) (Document, error) {
+func (s *Store) PutDocument(database, collection, id string, body []byte, expectedETag string) (Document, error) {
 	if err := ValidateDatabaseName(database); err != nil {
 		return Document{}, err
 	}
@@ -67,6 +71,10 @@ func (s *Store) PutDocument(database, collection, id string, body []byte) (Docum
 		return Document{}, err
 	}
 	data, err := normalizeJSON(body)
+	if err != nil {
+		return Document{}, err
+	}
+	encryptedData, err := encryptDocument(data, s.encryptionKey)
 	if err != nil {
 		return Document{}, err
 	}
@@ -81,10 +89,20 @@ func (s *Store) PutDocument(database, collection, id string, body []byte) (Docum
 		if b == nil {
 			return ErrNotFound
 		}
-		if b.Get([]byte(id)) == nil {
+		existingData := b.Get([]byte(id))
+		if existingData == nil {
 			return ErrNotFound
 		}
-		return b.Put([]byte(id), data)
+		
+		existingPlaintext, err := decryptDocument(existingData, s.encryptionKey)
+		if err != nil {
+			return fmt.Errorf("corrupt document (decrypt): %w", err)
+		}
+
+		if expectedETag != "" && computeETag(existingPlaintext) != expectedETag {
+			return ErrPreconditionFailed
+		}
+		return b.Put([]byte(id), encryptedData)
 	})
 
 	if err != nil {
@@ -94,10 +112,10 @@ func (s *Store) PutDocument(database, collection, id string, body []byte) (Docum
 		return Document{}, fmt.Errorf("put document: %w", err)
 	}
 
-	return Document{ID: id, Document: stdjson.RawMessage(data)}, nil
+	return Document{ID: id, Document: stdjson.RawMessage(data), ETag: computeETag(data)}, nil
 }
 
-func (s *Store) PatchDocument(database, collection, id string, body []byte) (Document, error) {
+func (s *Store) PatchDocument(database, collection, id string, body []byte, expectedETag string) (Document, error) {
 	if err := ValidateDatabaseName(database); err != nil {
 		return Document{}, err
 	}
@@ -127,8 +145,17 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte) (Doc
 			return ErrNotFound
 		}
 
+		existingPlaintext, err := decryptDocument(existingData, s.encryptionKey)
+		if err != nil {
+			return fmt.Errorf("corrupt document (decrypt): %w", err)
+		}
+
+		if expectedETag != "" && computeETag(existingPlaintext) != expectedETag {
+			return ErrPreconditionFailed
+		}
+
 		var existing map[string]interface{}
-		if err := sonic.Unmarshal(existingData, &existing); err != nil {
+		if err := sonic.Unmarshal(existingPlaintext, &existing); err != nil {
 			return fmt.Errorf("corrupt document: %w", err)
 		}
 
@@ -151,7 +178,12 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte) (Doc
 			return err
 		}
 
-		return b.Put([]byte(id), data)
+		encryptedData, err := encryptDocument(data, s.encryptionKey)
+		if err != nil {
+			return err
+		}
+
+		return b.Put([]byte(id), encryptedData)
 	})
 
 	if err != nil {
@@ -161,10 +193,10 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte) (Doc
 		return Document{}, fmt.Errorf("patch document: %w", err)
 	}
 
-	return Document{ID: id, Document: stdjson.RawMessage(data)}, nil
+	return Document{ID: id, Document: stdjson.RawMessage(data), ETag: computeETag(data)}, nil
 }
 
-func (s *Store) DeleteDocument(database, collection, id string) error {
+func (s *Store) DeleteDocument(database, collection, id string, expectedETag string) error {
 	if err := ValidateDatabaseName(database); err != nil {
 		return err
 	}
@@ -185,8 +217,18 @@ func (s *Store) DeleteDocument(database, collection, id string) error {
 		if b == nil {
 			return ErrNotFound
 		}
-		if b.Get([]byte(id)) == nil {
+		existingData := b.Get([]byte(id))
+		if existingData == nil {
 			return ErrNotFound
+		}
+		
+		existingPlaintext, err := decryptDocument(existingData, s.encryptionKey)
+		if err != nil {
+			return fmt.Errorf("corrupt document (decrypt): %w", err)
+		}
+
+		if expectedETag != "" && computeETag(existingPlaintext) != expectedETag {
+			return ErrPreconditionFailed
 		}
 		return b.Delete([]byte(id))
 	})

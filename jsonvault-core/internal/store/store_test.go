@@ -8,7 +8,7 @@ import (
 )
 
 func TestStoreDocumentCRUDPersistsJSON(t *testing.T) {
-	db, err := New(t.TempDir(), 8)
+	db, err := New(t.TempDir(), 8, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestStoreDocumentCRUDPersistsJSON(t *testing.T) {
 		t.Fatalf("unexpected compacted document: %s", got.Document)
 	}
 
-	updated, err := db.PutDocument("testdb", "users", doc.ID, []byte(`{"name":"Alice","active":false}`))
+	updated, err := db.PutDocument("testdb", "users", doc.ID, []byte(`{"name":"Alice","active":false}`), "")
 	if err != nil {
 		t.Fatalf("PutDocument: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestStoreDocumentCRUDPersistsJSON(t *testing.T) {
 		t.Fatalf("unexpected document list: %#v", documents)
 	}
 
-	if err := db.DeleteDocument("testdb", "users", doc.ID); err != nil {
+	if err := db.DeleteDocument("testdb", "users", doc.ID, ""); err != nil {
 		t.Fatalf("DeleteDocument: %v", err)
 	}
 	if _, err := db.GetDocument("testdb", "users", doc.ID); !errors.Is(err, ErrNotFound) {
@@ -74,7 +74,7 @@ func TestStoreDocumentCRUDPersistsJSON(t *testing.T) {
 }
 
 func TestStoreAutoCreatesCollectionOnInsert(t *testing.T) {
-	db, err := New(t.TempDir(), 8)
+	db, err := New(t.TempDir(), 8, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestStoreAutoCreatesCollectionOnInsert(t *testing.T) {
 }
 
 func TestStoreRejectsInvalidNamesAndJSON(t *testing.T) {
-	db, err := New(t.TempDir(), 8)
+	db, err := New(t.TempDir(), 8, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestStoreRejectsInvalidNamesAndJSON(t *testing.T) {
 
 func TestFailedUpdateLeavesOriginalFile(t *testing.T) {
 	root := t.TempDir()
-	db, err := New(root, 8)
+	db, err := New(root, 8, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestFailedUpdateLeavesOriginalFile(t *testing.T) {
 		t.Fatalf("CreateDocument: %v", err)
 	}
 
-	if _, err := db.PutDocument("testdb", "users", doc.ID, []byte(`{"version":`)); !errors.Is(err, ErrInvalidJSON) {
+	if _, err := db.PutDocument("testdb", "users", doc.ID, []byte(`{"version":`), ""); !errors.Is(err, ErrInvalidJSON) {
 		t.Fatalf("expected invalid JSON, got %v", err)
 	}
 
@@ -155,7 +155,7 @@ func TestFailedUpdateLeavesOriginalFile(t *testing.T) {
 }
 
 func TestStoreConcurrentCreatesStayValid(t *testing.T) {
-	db, err := New(t.TempDir(), 32)
+	db, err := New(t.TempDir(), 32, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

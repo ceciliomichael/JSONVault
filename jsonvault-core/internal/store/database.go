@@ -65,13 +65,29 @@ func (s *Store) DeleteDatabase(name string) error {
 	}
 
 	s.mu.Lock()
-	if db, ok := s.dbs[name]; ok {
-		db.Close()
-		delete(s.dbs, name)
+	h, ok := s.dbs[name]
+	if !ok {
+		h = &DBHandle{state: stateDeleting}
+		s.dbs[name] = h
+	} else {
+		h.mu.Lock()
+		h.state = stateDeleting
+		h.mu.Unlock()
 	}
 	s.mu.Unlock()
 
-	if err := os.Remove(path); err != nil {
+	if h.db != nil {
+		h.wg.Wait()
+		h.db.Close()
+	}
+
+	err := os.Remove(path)
+
+	s.mu.Lock()
+	delete(s.dbs, name)
+	s.mu.Unlock()
+
+	if err != nil {
 		return fmt.Errorf("delete database: %w", err)
 	}
 	return nil

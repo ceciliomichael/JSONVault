@@ -140,7 +140,7 @@ func TestAPIRejectsInvalidDocumentJSON(t *testing.T) {
 
 func testHandler(t *testing.T) http.Handler {
 	t.Helper()
-	db, err := store.New(t.TempDir(), 8)
+	db, err := store.New(t.TempDir(), 8, nil)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

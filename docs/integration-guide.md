@@ -1,6 +1,6 @@
 # JSONVault Integration Guide
 
-JSONVault is a file-backed NoSQL document database accessed via REST API. It uses a strict 3-tier hierarchy: **Database -> Collection -> Document**. 
+JSONVault is a high-performance NoSQL document database accessed via REST API. It uses the `bbolt` embedded storage engine under the hood, organizing data into a strict 3-tier hierarchy: **Database -> Collection -> Document**.
 
 This document serves as the definitive guide for integrating JSONVault. AI Agents and integrations must adhere strictly to these endpoint definitions, configurations, and schemas.
 
@@ -12,8 +12,9 @@ When connecting to JSONVault from your client application, it is highly recommen
 # The URL where JSONVault is hosted
 JSONVAULT_BASE_URL=http://localhost:8080
 
-# The Bearer Token API Key for authorization
-JSONVAULT_API_KEY=your-secret-api-key
+# The Bearer Token API Key for authorization. 
+# Supports Scopes via colon: secret_key:admin, other_key:read_only
+JSONVAULT_API_KEYS=your-secret-api-key:admin,another-key:read_only
 
 # The name of your isolated database project (used in routes)
 JSONVAULT_DATABASE_NAME=my_app_db
@@ -34,6 +35,15 @@ Authorization: Bearer <your-api-key>
 Content-Type: application/json
 ```
 *(Note: `Content-Type` is only strictly required for `POST`, `PUT`, and `PATCH` requests).*
+
+### Scoped Auth (RBAC)
+JSONVault API keys can be restricted to specific scopes by defining them in the `JSONVAULT_API_KEYS` env variable with a `:scope` suffix (e.g. `secret_key:read_only`). Existing keys without a colon default to `admin`.
+- `admin`: Full access to everything, including dropping databases.
+- `read_write`: Can view, create, modify, and delete documents and collections, but cannot drop databases.
+- `read_only`: Can only fetch documents and list databases/collections.
+
+### Optimistic Concurrency Control (ETags)
+To prevent silent lost updates during concurrent edits, all document reads return an `ETag` header. When performing a `PUT`, `PATCH`, or `DELETE`, you may optionally provide this value in the `If-Match` header. If the document has been modified since you read it, the server will return `412 Precondition Failed`.
 
 ---
 
@@ -92,8 +102,8 @@ Checks if the server is running. No authentication required.
 - **Request:** `GET /api/v1/{database}/{collection}`
   - **Query Parameters:**
     - `limit` (int, default: 100, max: 1000): Number of documents to return.
-    - `offset` (int, default: 0): Number of documents to skip.
-    - `filter[<field>]` (string): Filter documents where `<field>` matches the provided value exactly (e.g., `?filter[active]=true`).
+    - `offset` (int, default: 0, max: 10000): Number of documents to skip.
+    - `filter[<field>]` (string): Filter documents where `<field>` matches the provided value exactly (e.g., `?filter[active]=true`). Max 5 filters per query.
 - **Response (200 OK):** Array of document objects. Pagination metadata is returned in response headers (`X-Total-Count`, `X-Limit`, `X-Offset`).
   ```json
   [
@@ -125,6 +135,7 @@ Checks if the server is running. No authentication required.
 
 ### Update Document
 - **Request:** `PUT /api/v1/{database}/{collection}/{id}`
+- **Headers (Optional):** `If-Match: <etag>`
 - **Body:** Any valid JSON object. *(This operation completely overwrites the existing document).*
 - **Response (200 OK):**
   ```json
@@ -136,6 +147,7 @@ Checks if the server is running. No authentication required.
 
 ### Partial Update Document
 - **Request:** `PATCH /api/v1/{database}/{collection}/{id}`
+- **Headers (Optional):** `If-Match: <etag>`
 - **Body:** Any valid JSON object containing fields to merge. *(This operation updates specific fields while preserving the rest of the document).*
 - **Response (200 OK):**
   ```json
@@ -147,6 +159,7 @@ Checks if the server is running. No authentication required.
 
 ### Delete Document
 - **Request:** `DELETE /api/v1/{database}/{collection}/{id}`
+- **Headers (Optional):** `If-Match: <etag>`
 - **Response (200 OK):**
   ```json
   {
@@ -170,10 +183,12 @@ Standard JSON error response format across all endpoints:
 ```
 
 **Common HTTP Status Codes:**
-- `400 Bad Request`: Invalid JSON payload or naming formats.
+- `400 Bad Request`: Invalid JSON payload, missing filters, or offset too large.
 - `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: API Key does not have the required scope.
 - `404 Not Found`: Target resource does not exist.
 - `405 Method Not Allowed`: HTTP verb not supported on this endpoint.
+- `412 Precondition Failed`: ETag provided in `If-Match` does not match current document.
 - `413 Payload Too Large`: Request body exceeds the 10MB limit.
 - `415 Unsupported Media Type`: Payload without `application/json`.
 - `500 Internal Server Error`: Unexpected server issue.

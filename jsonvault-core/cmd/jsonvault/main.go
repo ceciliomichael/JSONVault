@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
 
 	"jsonvault/internal/auth"
 	"jsonvault/internal/config"
@@ -15,20 +16,26 @@ import (
 )
 
 func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
+
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		slog.Error("load config", "error", err)
+		os.Exit(1)
 	}
 
-	db, err := store.New(cfg.DataDir, cfg.CacheEntries)
+	db, err := store.New(cfg.DataDir, cfg.CacheEntries, cfg.EncryptionKey)
 	if err != nil {
-		log.Fatalf("open store: %v", err)
+		slog.Error("open store", "error", err)
+		os.Exit(1)
 	}
 	defer db.Close()
 
 	authenticator, err := auth.New(cfg.APIKeys)
 	if err != nil {
-		log.Fatalf("configure auth: %v", err)
+		slog.Error("configure auth", "error", err)
+		os.Exit(1)
 	}
 
 	handler := httpapi.NewHandler(db, authenticator, httpapi.Options{
@@ -44,12 +51,12 @@ func main() {
 		IdleTimeout:       cfg.IdleTimeout,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("JSONVault listening on %s (data=%s, base_url=%s)", cfg.Addr, cfg.DataDir, cfg.BaseURL)
+		slog.Info("JSONVault starting", "addr", cfg.Addr, "dataDir", cfg.DataDir, "baseURL", cfg.BaseURL)
 		errCh <- server.ListenAndServe()
 	}()
 
@@ -58,11 +65,14 @@ func main() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			log.Fatalf("shutdown server: %v", err)
+			slog.Error("shutdown server", "error", err)
+			os.Exit(1)
 		}
+		slog.Info("JSONVault shutdown gracefully")
 	case err := <-errCh:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("serve: %v", err)
+			slog.Error("serve", "error", err)
+			os.Exit(1)
 		}
 	}
 }

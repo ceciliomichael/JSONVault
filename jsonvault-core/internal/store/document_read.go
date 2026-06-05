@@ -57,10 +57,15 @@ func (s *Store) ListDocuments(database, collection string, limit, offset int, fi
 				}
 			}
 
+			plaintext, err := decryptDocument(v, s.encryptionKey)
+			if err != nil {
+				return fmt.Errorf("corrupt document (decrypt): %w", err)
+			}
+
 			matches := true
 			if len(filter) > 0 {
 				var parsed map[string]interface{}
-				if err := sonic.Unmarshal(v, &parsed); err == nil {
+				if err := sonic.Unmarshal(plaintext, &parsed); err == nil {
 					for fk, fv := range filter {
 						val, exists := parsed[fk]
 						if !exists || fmt.Sprintf("%v", val) != fv {
@@ -77,7 +82,8 @@ func (s *Store) ListDocuments(database, collection string, limit, offset int, fi
 				if matched >= offset && len(documents) < limit {
 					documents = append(documents, Document{
 						ID:       string(k),
-						Document: stdjson.RawMessage(v),
+						Document: stdjson.RawMessage(plaintext),
+						ETag:     computeETag(plaintext),
 					})
 				}
 				matched++
@@ -131,19 +137,32 @@ func (s *Store) GetDocument(database, collection, id string) (Document, error) {
 		return Document{}, err
 	}
 
-	var docData []byte
+	var doc Document
 	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(collection))
 		if b == nil {
 			return ErrNotFound
 		}
-		v := b.Get([]byte(id))
-		if v == nil {
+
+		data := b.Get([]byte(id))
+		if data == nil {
 			return ErrNotFound
 		}
-		// Copy bytes
-		docData = make([]byte, len(v))
-		copy(docData, v)
+
+		plaintext, err := decryptDocument(data, s.encryptionKey)
+		if err != nil {
+			return fmt.Errorf("corrupt document (decrypt): %w", err)
+		}
+
+		// make a copy because data is only valid during the transaction
+		docData := make([]byte, len(plaintext))
+		copy(docData, plaintext)
+
+		doc = Document{
+			ID:       id,
+			Document: docData,
+			ETag:     computeETag(docData),
+		}
 		return nil
 	})
 
@@ -154,5 +173,5 @@ func (s *Store) GetDocument(database, collection, id string) (Document, error) {
 		return Document{}, fmt.Errorf("get document: %w", err)
 	}
 
-	return Document{ID: id, Document: stdjson.RawMessage(docData)}, nil
+	return doc, nil
 }

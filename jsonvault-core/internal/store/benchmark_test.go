@@ -5,7 +5,7 @@ import (
 )
 
 func BenchmarkCreateDocument(b *testing.B) {
-	db, err := New(b.TempDir(), 8)
+	db, err := New(b.TempDir(), 8, nil)
 	if err != nil {
 		b.Fatalf("New: %v", err)
 	}
@@ -24,7 +24,7 @@ func BenchmarkCreateDocument(b *testing.B) {
 }
 
 func BenchmarkGetDocument(b *testing.B) {
-	db, err := New(b.TempDir(), 8)
+	db, err := New(b.TempDir(), 8, nil)
 	if err != nil {
 		b.Fatalf("New: %v", err)
 	}
@@ -45,7 +45,7 @@ func BenchmarkGetDocument(b *testing.B) {
 }
 
 func BenchmarkListDocuments(b *testing.B) {
-	db, err := New(b.TempDir(), 8)
+	db, err := New(b.TempDir(), 8, nil)
 	if err != nil {
 		b.Fatalf("New: %v", err)
 	}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -24,6 +25,7 @@ type Config struct {
 	WriteTimeout      time.Duration
 	IdleTimeout       time.Duration
 	ShutdownTimeout   time.Duration
+	EncryptionKey     []byte
 }
 
 func Load() (Config, error) {
@@ -77,6 +79,19 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	encryptionKeyStr := envString("JSONVAULT_ENCRYPTION_KEY", "")
+	var encryptionKey []byte
+	if encryptionKeyStr != "" {
+		if len(encryptionKeyStr) != 64 {
+			return Config{}, fmt.Errorf("JSONVAULT_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)")
+		}
+		var err error
+		encryptionKey, err = hex.DecodeString(encryptionKeyStr)
+		if err != nil {
+			return Config{}, fmt.Errorf("JSONVAULT_ENCRYPTION_KEY must be a valid hex string: %w", err)
+		}
+	}
+
 	return Config{
 		Addr:              envString("JSONVAULT_ADDR", ":8080"),
 		BaseURL:           envString("JSONVAULT_BASE_URL", "http://localhost:8080"),
@@ -89,6 +104,7 @@ func Load() (Config, error) {
 		WriteTimeout:      writeTimeout,
 		IdleTimeout:       idleTimeout,
 		ShutdownTimeout:   shutdownTimeout,
+		EncryptionKey:     encryptionKey,
 	}, nil
 }
 

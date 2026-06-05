@@ -8,6 +8,8 @@ import (
 	"errors"
 	
 	"github.com/gin-gonic/gin"
+	"jsonvault/internal/store"
+	"jsonvault/internal/auth"
 )
 
 func (s *Server) handleCollectionDocuments(c *gin.Context) {
@@ -16,6 +18,10 @@ func (s *Server) handleCollectionDocuments(c *gin.Context) {
 	
 	switch c.Request.Method {
 	case http.MethodGet:
+		if !s.hasScope(c, auth.ScopeReadOnly) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
 		query := c.Request.URL.Query()
 		limit := 100
 		if l, err := strconv.Atoi(query.Get("limit")); err == nil && l > 0 {
@@ -37,6 +43,15 @@ func (s *Server) handleCollectionDocuments(c *gin.Context) {
 			}
 		}
 
+		if len(filter) > 5 {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "bad_request", "message": "too many filters (max 5)"}})
+			return
+		}
+		if offset > 10000 {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "bad_request", "message": "offset too large (max 10000)"}})
+			return
+		}
+
 		documents, total, err := s.store.ListDocuments(database, collection, limit, offset, filter)
 		if err != nil {
 			s.handleStoreError(c, err)
@@ -49,6 +64,10 @@ func (s *Server) handleCollectionDocuments(c *gin.Context) {
 
 		c.JSON(http.StatusOK, documents)
 	case http.MethodPost:
+		if !s.hasScope(c, auth.ScopeReadWrite) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
 		body, ok := s.readDocumentBodyGin(c)
 		if !ok {
 			return
@@ -58,6 +77,7 @@ func (s *Server) handleCollectionDocuments(c *gin.Context) {
 			s.handleStoreError(c, err)
 			return
 		}
+		c.Header("ETag", document.ETag)
 		c.JSON(http.StatusCreated, document)
 	default:
 		c.AbortWithStatus(http.StatusMethodNotAllowed)
@@ -71,36 +91,67 @@ func (s *Server) handleDocumentByID(c *gin.Context) {
 	
 	switch c.Request.Method {
 	case http.MethodGet:
+		if !s.hasScope(c, auth.ScopeReadOnly) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
 		document, err := s.store.GetDocument(database, collection, id)
 		if err != nil {
 			s.handleStoreError(c, err)
 			return
 		}
+		c.Header("ETag", document.ETag)
 		c.JSON(http.StatusOK, document)
 	case http.MethodPut:
+		if !s.hasScope(c, auth.ScopeReadWrite) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
 		body, ok := s.readDocumentBodyGin(c)
 		if !ok {
 			return
 		}
-		document, err := s.store.PutDocument(database, collection, id, body)
+		document, err := s.store.PutDocument(database, collection, id, body, c.GetHeader("If-Match"))
 		if err != nil {
+			if errors.Is(err, store.ErrPreconditionFailed) {
+				c.JSON(http.StatusPreconditionFailed, gin.H{"error": gin.H{"code": "precondition_failed", "message": "ETag mismatch"}})
+				return
+			}
 			s.handleStoreError(c, err)
 			return
 		}
+		c.Header("ETag", document.ETag)
 		c.JSON(http.StatusOK, document)
 	case http.MethodPatch:
+		if !s.hasScope(c, auth.ScopeReadWrite) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
 		body, ok := s.readDocumentBodyGin(c)
 		if !ok {
 			return
 		}
-		document, err := s.store.PatchDocument(database, collection, id, body)
+		document, err := s.store.PatchDocument(database, collection, id, body, c.GetHeader("If-Match"))
 		if err != nil {
+			if errors.Is(err, store.ErrPreconditionFailed) {
+				c.JSON(http.StatusPreconditionFailed, gin.H{"error": gin.H{"code": "precondition_failed", "message": "ETag mismatch"}})
+				return
+			}
 			s.handleStoreError(c, err)
 			return
 		}
+		c.Header("ETag", document.ETag)
 		c.JSON(http.StatusOK, document)
 	case http.MethodDelete:
-		if err := s.store.DeleteDocument(database, collection, id); err != nil {
+		if !s.hasScope(c, auth.ScopeReadWrite) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		if err := s.store.DeleteDocument(database, collection, id, c.GetHeader("If-Match")); err != nil {
+			if errors.Is(err, store.ErrPreconditionFailed) {
+				c.JSON(http.StatusPreconditionFailed, gin.H{"error": gin.H{"code": "precondition_failed", "message": "ETag mismatch"}})
+				return
+			}
 			s.handleStoreError(c, err)
 			return
 		}
