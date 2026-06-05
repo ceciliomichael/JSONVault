@@ -41,7 +41,7 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 		limit = 100
 	}
 
-	var documents []Document
+	documents := []Document{}
 	var total int
 	var matched int
 
