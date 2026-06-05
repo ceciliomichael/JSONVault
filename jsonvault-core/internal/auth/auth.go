@@ -50,6 +50,11 @@ func (a *Authenticator) Authenticate(header string) bool {
 
 func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		if !a.Authenticate(r.Header.Get("Authorization")) {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("WWW-Authenticate", `Bearer realm="jsonvault"`)
