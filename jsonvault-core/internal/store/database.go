@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 func (s *Store) CreateDatabase(name string) (bool, error) {
@@ -13,15 +14,17 @@ func (s *Store) CreateDatabase(name string) (bool, error) {
 		return false, err
 	}
 
-	path := filepath.Join(s.root, name)
+	path := filepath.Join(s.root, name+".db")
 	_, statErr := os.Stat(path)
-	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-		return false, fmt.Errorf("inspect database: %w", statErr)
+	created := errors.Is(statErr, os.ErrNotExist)
+
+	// getDB will create the file via bolt.Open if it doesn't exist
+	_, err := s.getDB(name)
+	if err != nil {
+		return false, err
 	}
-	if err := os.MkdirAll(path, 0o700); err != nil {
-		return false, fmt.Errorf("create database: %w", err)
-	}
-	return errors.Is(statErr, os.ErrNotExist), nil
+
+	return created, nil
 }
 
 func (s *Store) ListDatabases() ([]string, error) {
@@ -32,10 +35,13 @@ func (s *Store) ListDatabases() ([]string, error) {
 
 	databases := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if entry.IsDir() {
 			continue
 		}
-		name := entry.Name()
+		if !strings.HasSuffix(entry.Name(), ".db") {
+			continue
+		}
+		name := strings.TrimSuffix(entry.Name(), ".db")
 		if err := ValidateDatabaseName(name); err != nil {
 			continue
 		}
@@ -50,16 +56,23 @@ func (s *Store) DeleteDatabase(name string) error {
 		return err
 	}
 
-	path := filepath.Join(s.root, name)
+	path := filepath.Join(s.root, name+".db")
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ErrNotFound
 		}
 		return fmt.Errorf("inspect database: %w", err)
 	}
-	if err := os.RemoveAll(path); err != nil {
+
+	s.mu.Lock()
+	if db, ok := s.dbs[name]; ok {
+		db.Close()
+		delete(s.dbs, name)
+	}
+	s.mu.Unlock()
+
+	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("delete database: %w", err)
 	}
-	s.cache.DeletePrefix(name + "/")
 	return nil
 }

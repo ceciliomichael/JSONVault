@@ -3,12 +3,10 @@ package store
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"sync"
-	
 	stdjson "encoding/json"
+	
 	"github.com/bytedance/sonic"
+	bolt "go.etcd.io/bbolt"
 )
 
 func (s *Store) CreateDocument(database, collection string, body []byte) (Document, error) {
@@ -23,47 +21,38 @@ func (s *Store) CreateDocument(database, collection string, body []byte) (Docume
 		return Document{}, err
 	}
 
-	colLock := s.locks.ForCollection(database, collection)
-	colLock.RLock()
-	defer colLock.RUnlock()
-
-	collectionPath := filepath.Join(s.root, database, collection)
-	if err := os.MkdirAll(collectionPath, 0o700); err != nil {
-		return Document{}, fmt.Errorf("create collection: %w", err)
+	db, err := s.getDB(database)
+	if err != nil {
+		return Document{}, err
 	}
 
 	var id string
-	var path string
-	var docLock *sync.RWMutex
-	for attempts := 0; attempts < 16; attempts++ {
-		id, err = generateID()
+	err = db.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte(collection))
 		if err != nil {
-			return Document{}, err
+			return err
 		}
-		
-		docLock = s.locks.ForDocument(database, collection, id)
-		docLock.Lock()
-		
-		path = filepath.Join(collectionPath, id+".json")
-		_, statErr := os.Stat(path)
-		if errors.Is(statErr, os.ErrNotExist) {
-			break
-		}
-		docLock.Unlock() // unlock if collision
-		
-		if statErr != nil {
-			return Document{}, fmt.Errorf("inspect document: %w", statErr)
-		}
-		if attempts == 15 {
-			return Document{}, fmt.Errorf("generate document id: exhausted collision retries")
-		}
-	}
-	defer docLock.Unlock()
 
-	if err := writeAtomic(path, data); err != nil {
-		return Document{}, err
+		for attempts := 0; attempts < 16; attempts++ {
+			id, err = generateID()
+			if err != nil {
+				return err
+			}
+			if b.Get([]byte(id)) == nil {
+				break
+			}
+			if attempts == 15 {
+				return fmt.Errorf("generate document id: exhausted collision retries")
+			}
+		}
+
+		return b.Put([]byte(id), data)
+	})
+
+	if err != nil {
+		return Document{}, fmt.Errorf("create document: %w", err)
 	}
-	s.cache.Set(cacheKey(database, collection, id), data)
+
 	return Document{ID: id, Document: stdjson.RawMessage(data)}, nil
 }
 
@@ -82,30 +71,34 @@ func (s *Store) PutDocument(database, collection, id string, body []byte) (Docum
 		return Document{}, err
 	}
 
-	colLock := s.locks.ForCollection(database, collection)
-	colLock.RLock()
-	defer colLock.RUnlock()
-	
-	docLock := s.locks.ForDocument(database, collection, id)
-	docLock.Lock()
-	defer docLock.Unlock()
-
-	path := filepath.Join(s.root, database, collection, id+".json")
-	if _, err := os.Stat(path); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return Document{}, ErrNotFound
-		}
-		return Document{}, fmt.Errorf("inspect document: %w", err)
-	}
-	if err := writeAtomic(path, data); err != nil {
+	db, err := s.getDB(database)
+	if err != nil {
 		return Document{}, err
 	}
-	s.cache.Set(cacheKey(database, collection, id), data)
+
+	err = db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(collection))
+		if b == nil {
+			return ErrNotFound
+		}
+		if b.Get([]byte(id)) == nil {
+			return ErrNotFound
+		}
+		return b.Put([]byte(id), data)
+	})
+
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return Document{}, ErrNotFound
+		}
+		return Document{}, fmt.Errorf("put document: %w", err)
+	}
+
 	return Document{ID: id, Document: stdjson.RawMessage(data)}, nil
 }
 
 func (s *Store) PatchDocument(database, collection, id string, body []byte) (Document, error) {
-    if err := ValidateDatabaseName(database); err != nil {
+	if err := ValidateDatabaseName(database); err != nil {
 		return Document{}, err
 	}
 	if err := ValidateCollectionName(collection); err != nil {
@@ -114,59 +107,60 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte) (Doc
 	if err := ValidateDocumentID(id); err != nil {
 		return Document{}, err
 	}
-	
-	// Ensure the patch body is valid JSON
 	if !sonic.ConfigDefault.Valid(body) {
 		return Document{}, ErrInvalidJSON
 	}
 
-	colLock := s.locks.ForCollection(database, collection)
-	colLock.RLock()
-	defer colLock.RUnlock()
-	
-	docLock := s.locks.ForDocument(database, collection, id)
-	docLock.Lock()
-	defer docLock.Unlock()
-
-    // Read existing
-	doc, err := s.readDocumentLocked(database, collection, id)
-	if err != nil {
-	    return Document{}, err
-	}
-	
-	// Parse existing
-	var existing map[string]interface{}
-	if err := sonic.Unmarshal(doc.Document, &existing); err != nil {
-	    return Document{}, fmt.Errorf("corrupt document: %w", err)
-	}
-	
-	// Parse patch
-	var patch map[string]interface{}
-	if err := sonic.Unmarshal(body, &patch); err != nil {
-	    return Document{}, ErrInvalidJSON
-	}
-	
-	// Merge patch into existing
-	for k, v := range patch {
-	    existing[k] = v
-	}
-	
-	// Re-marshal
-	mergedData, err := sonic.Marshal(existing)
-	if err != nil {
-	    return Document{}, fmt.Errorf("marshal merged document: %w", err)
-	}
-	
-	data, err := normalizeJSON(mergedData)
+	db, err := s.getDB(database)
 	if err != nil {
 		return Document{}, err
 	}
 
-	path := filepath.Join(s.root, database, collection, id+".json")
-	if err := writeAtomic(path, data); err != nil {
-		return Document{}, err
+	var data []byte
+	err = db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(collection))
+		if b == nil {
+			return ErrNotFound
+		}
+		existingData := b.Get([]byte(id))
+		if existingData == nil {
+			return ErrNotFound
+		}
+
+		var existing map[string]interface{}
+		if err := sonic.Unmarshal(existingData, &existing); err != nil {
+			return fmt.Errorf("corrupt document: %w", err)
+		}
+
+		var patch map[string]interface{}
+		if err := sonic.Unmarshal(body, &patch); err != nil {
+			return ErrInvalidJSON
+		}
+
+		for k, v := range patch {
+			existing[k] = v
+		}
+
+		mergedData, err := sonic.Marshal(existing)
+		if err != nil {
+			return fmt.Errorf("marshal merged document: %w", err)
+		}
+
+		data, err = normalizeJSON(mergedData)
+		if err != nil {
+			return err
+		}
+
+		return b.Put([]byte(id), data)
+	})
+
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return Document{}, ErrNotFound
+		}
+		return Document{}, fmt.Errorf("patch document: %w", err)
 	}
-	s.cache.Set(cacheKey(database, collection, id), data)
+
 	return Document{ID: id, Document: stdjson.RawMessage(data)}, nil
 }
 
@@ -181,21 +175,28 @@ func (s *Store) DeleteDocument(database, collection, id string) error {
 		return err
 	}
 
-	colLock := s.locks.ForCollection(database, collection)
-	colLock.RLock()
-	defer colLock.RUnlock()
-	
-	docLock := s.locks.ForDocument(database, collection, id)
-	docLock.Lock()
-	defer docLock.Unlock()
+	db, err := s.getDB(database)
+	if err != nil {
+		return err
+	}
 
-	path := filepath.Join(s.root, database, collection, id+".json")
-	if err := os.Remove(path); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+	err = db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(collection))
+		if b == nil {
+			return ErrNotFound
+		}
+		if b.Get([]byte(id)) == nil {
+			return ErrNotFound
+		}
+		return b.Delete([]byte(id))
+	})
+
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
 			return ErrNotFound
 		}
 		return fmt.Errorf("delete document: %w", err)
 	}
-	s.cache.Delete(cacheKey(database, collection, id))
+
 	return nil
 }

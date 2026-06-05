@@ -3,8 +3,6 @@ package store
 import (
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 )
@@ -14,6 +12,7 @@ func TestStoreDocumentCRUDPersistsJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	defer db.Close()
 
 	created, err := db.CreateDatabase("testdb")
 	if err != nil {
@@ -79,6 +78,7 @@ func TestStoreAutoCreatesCollectionOnInsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	defer db.Close()
 
 	if _, err := db.CreateDocument("testdb", "events", []byte(`{"type":"signup"}`)); err != nil {
 		t.Fatalf("CreateDocument: %v", err)
@@ -106,6 +106,7 @@ func TestStoreRejectsInvalidNamesAndJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	defer db.Close()
 
 	if _, err := db.CreateDocument("../testdb", "users", []byte(`{"ok":true}`)); !errors.Is(err, ErrInvalidName) {
 		t.Fatalf("expected invalid database name, got %v", err)
@@ -133,6 +134,7 @@ func TestFailedUpdateLeavesOriginalFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	defer db.Close()
 
 	doc, err := db.CreateDocument("testdb", "users", []byte(`{"version":1}`))
 	if err != nil {
@@ -143,13 +145,12 @@ func TestFailedUpdateLeavesOriginalFile(t *testing.T) {
 		t.Fatalf("expected invalid JSON, got %v", err)
 	}
 
-	path := filepath.Join(root, "testdb", "users", doc.ID+".json")
-	data, err := os.ReadFile(path)
+	got, err := db.GetDocument("testdb", "users", doc.ID)
 	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
+		t.Fatalf("GetDocument: %v", err)
 	}
-	if string(data) != `{"version":1}` {
-		t.Fatalf("original file was not preserved: %s", data)
+	if string(got.Document) != `{"version":1}` {
+		t.Fatalf("original file was not preserved: %s", got.Document)
 	}
 }
 
@@ -158,6 +159,7 @@ func TestStoreConcurrentCreatesStayValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	defer db.Close()
 
 	const workers = 24
 	var wg sync.WaitGroup

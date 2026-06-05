@@ -72,15 +72,4 @@ curl.exe -X POST http://localhost:8080/api/v1/my_app/users `
   -d '{\"name\":\"Alice\",\"active\":true}'
 ```
 
-## JavaScript Client
-
-A lightweight fetch-based client is available at `clients/javascript/jsonvault-client.js`:
-
-```javascript
-import { JSONVaultClient } from "./clients/javascript/jsonvault-client.js";
-
-const db = new JSONVaultClient("http://localhost:8080", "change-this-long-random-secret");
-const created = await db.createDocument("my_app", "users", { name: "Alice", active: true });
-```
-
 For production, run JSONVault behind an HTTPS reverse proxy so API keys and payloads are encrypted in transit.

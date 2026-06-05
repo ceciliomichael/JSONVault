@@ -24,6 +24,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("open store: %v", err)
 	}
+	defer db.Close()
 
 	authenticator, err := auth.New(cfg.APIKeys)
 	if err != nil {

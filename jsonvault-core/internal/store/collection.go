@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	bolt "go.etcd.io/bbolt"
 )
 
 func (s *Store) CreateCollection(database, collection string) (bool, error) {
@@ -16,24 +18,28 @@ func (s *Store) CreateCollection(database, collection string) (bool, error) {
 		return false, err
 	}
 
-	lock := s.locks.ForCollection(database, collection)
-	lock.Lock()
-	defer lock.Unlock()
-
-	dbPath := filepath.Join(s.root, database)
-	if err := os.MkdirAll(dbPath, 0o700); err != nil {
-		return false, fmt.Errorf("create database: %w", err)
+	db, err := s.getDB(database)
+	if err != nil {
+		return false, err
 	}
 
-	path := filepath.Join(s.root, database, collection)
-	_, statErr := os.Stat(path)
-	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-		return false, fmt.Errorf("inspect collection: %w", statErr)
-	}
-	if err := os.MkdirAll(path, 0o700); err != nil {
+	var created bool
+	err = db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(collection))
+		if b == nil {
+			_, err := tx.CreateBucket([]byte(collection))
+			if err != nil {
+				return err
+			}
+			created = true
+		}
+		return nil
+	})
+
+	if err != nil {
 		return false, fmt.Errorf("create collection: %w", err)
 	}
-	return errors.Is(statErr, os.ErrNotExist), nil
+	return created, nil
 }
 
 func (s *Store) ListCollections(database string) ([]string, error) {
@@ -41,26 +47,30 @@ func (s *Store) ListCollections(database string) ([]string, error) {
 		return nil, err
 	}
 
-	dbPath := filepath.Join(s.root, database)
-	entries, err := os.ReadDir(dbPath)
-	if err != nil {
+	path := filepath.Join(s.root, database+".db")
+	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, ErrNotFound
 		}
+		return nil, fmt.Errorf("inspect database: %w", err)
+	}
+
+	db, err := s.getDB(database)
+	if err != nil {
+		return nil, err
+	}
+
+	var collections []string
+	err = db.View(func(tx *bolt.Tx) error {
+		return tx.ForEach(func(name []byte, _ *bolt.Bucket) error {
+			collections = append(collections, string(name))
+			return nil
+		})
+	})
+	if err != nil {
 		return nil, fmt.Errorf("list collections: %w", err)
 	}
 
-	collections := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if err := ValidateCollectionName(name); err != nil {
-			continue
-		}
-		collections = append(collections, name)
-	}
 	sort.Strings(collections)
 	return collections, nil
 }
@@ -73,20 +83,31 @@ func (s *Store) DeleteCollection(database, collection string) error {
 		return err
 	}
 
-	lock := s.locks.ForCollection(database, collection)
-	lock.Lock()
-	defer lock.Unlock()
-
-	path := filepath.Join(s.root, database, collection)
+	path := filepath.Join(s.root, database+".db")
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ErrNotFound
 		}
-		return fmt.Errorf("inspect collection: %w", err)
+		return fmt.Errorf("inspect database: %w", err)
 	}
-	if err := os.RemoveAll(path); err != nil {
+
+	db, err := s.getDB(database)
+	if err != nil {
+		return err
+	}
+
+	err = db.Update(func(tx *bolt.Tx) error {
+		if tx.Bucket([]byte(collection)) == nil {
+			return ErrNotFound
+		}
+		return tx.DeleteBucket([]byte(collection))
+	})
+
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return ErrNotFound
+		}
 		return fmt.Errorf("delete collection: %w", err)
 	}
-	s.cache.DeletePrefix(cachePrefix(database, collection))
 	return nil
 }

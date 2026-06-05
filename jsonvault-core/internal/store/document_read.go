@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
-
+	
 	stdjson "encoding/json"
 	"github.com/bytedance/sonic"
+	bolt "go.etcd.io/bbolt"
 )
 
 func (s *Store) ListDocuments(database, collection string, limit, offset int, filter map[string]string) ([]Document, int, error) {
@@ -20,88 +19,91 @@ func (s *Store) ListDocuments(database, collection string, limit, offset int, fi
 		return nil, 0, err
 	}
 
-	colLock := s.locks.ForCollection(database, collection)
-	colLock.RLock()
-	defer colLock.RUnlock()
-
-	collectionPath := filepath.Join(s.root, database, collection)
-	entries, err := os.ReadDir(collectionPath)
-	if err != nil {
+	path := filepath.Join(s.root, database+".db")
+	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			return nil, 0, ErrNotFound
+		}
+		return nil, 0, fmt.Errorf("inspect database: %w", err)
+	}
+
+	db, err := s.getDB(database)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	if limit <= 0 {
+		limit = 100
+	}
+
+	var documents []Document
+	var total int
+	var matched int
+
+	err = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(collection))
+		if b == nil {
+			return ErrNotFound
+		}
+
+		c := b.Cursor()
+		
+		total = b.Stats().KeyN
+
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			if len(documents) >= limit {
+				if len(filter) == 0 {
+					break
+				}
+			}
+
+			matches := true
+			if len(filter) > 0 {
+				var parsed map[string]interface{}
+				if err := sonic.Unmarshal(v, &parsed); err == nil {
+					for fk, fv := range filter {
+						val, exists := parsed[fk]
+						if !exists || fmt.Sprintf("%v", val) != fv {
+							matches = false
+							break
+						}
+					}
+				} else {
+					matches = false
+				}
+			}
+
+			if matches {
+				if matched >= offset && len(documents) < limit {
+					documents = append(documents, Document{
+						ID:       string(k),
+						Document: stdjson.RawMessage(v),
+					})
+				}
+				matched++
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
 			return nil, 0, ErrNotFound
 		}
 		return nil, 0, fmt.Errorf("list documents: %w", err)
 	}
 
-	ids := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		info, err := entry.Info()
-		if err != nil || !info.Mode().IsRegular() || !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		id := strings.TrimSuffix(entry.Name(), ".json")
-		if err := ValidateDocumentID(id); err != nil {
-			continue
-		}
-		ids = append(ids, id)
+	// Deep copy required because slices inside bolt.Tx become invalid after tx closes
+	for i := range documents {
+	    clone := make([]byte, len(documents[i].Document))
+	    copy(clone, documents[i].Document)
+	    documents[i].Document = stdjson.RawMessage(clone)
 	}
-	sort.Strings(ids)
 
-	documents := make([]Document, 0)
-	total := len(ids)
-	
-	if limit <= 0 {
-	    limit = 100 // default limit
-	}
-	
-	matched := 0
-	for _, id := range ids {
-		if len(documents) >= limit {
-			break
-		}
-		
-		docLock := s.locks.ForDocument(database, collection, id)
-		docLock.RLock()
-		doc, err := s.readDocumentLocked(database, collection, id)
-		docLock.RUnlock()
-		
-		if err != nil {
-		    if errors.Is(err, ErrNotFound) {
-		        continue
-		    }
-			return nil, 0, err
-		}
-		
-		// Apply filter
-		matches := true
-		if len(filter) > 0 {
-		        var parsed map[string]interface{}
-		        if err := sonic.Unmarshal(doc.Document, &parsed); err == nil {
-		            for k, v := range filter {
-		            val, exists := parsed[k]
-		            if !exists || fmt.Sprintf("%v", val) != v {
-		                matches = false
-		                break
-		            }
-		        }
-		    } else {
-		        matches = false
-		    }
-		}
-		
-		if matches {
-		    if matched >= offset {
-		        documents = append(documents, doc)
-		    }
-		    matched++
-		}
-	}
-	
 	if len(filter) > 0 {
-	    total = matched // If filtering, total is the number of matching documents found so far (approximate if we hit limit)
-	    // To get exact total for filtered we would have to scan all. We skip that for performance.
+		total = matched
 	}
-	
+
 	return documents, total, nil
 }
 
@@ -116,34 +118,41 @@ func (s *Store) GetDocument(database, collection, id string) (Document, error) {
 		return Document{}, err
 	}
 
-	colLock := s.locks.ForCollection(database, collection)
-	colLock.RLock()
-	defer colLock.RUnlock()
-	
-	docLock := s.locks.ForDocument(database, collection, id)
-	docLock.RLock()
-	defer docLock.RUnlock()
-
-	return s.readDocumentLocked(database, collection, id)
-}
-
-func (s *Store) readDocumentLocked(database, collection, id string) (Document, error) {
-	key := cacheKey(database, collection, id)
-	if data, ok := s.cache.Get(key); ok {
-		return Document{ID: id, Document: stdjson.RawMessage(data)}, nil
-	}
-
-	path := filepath.Join(s.root, database, collection, id+".json")
-	data, err := os.ReadFile(path)
-	if err != nil {
+	path := filepath.Join(s.root, database+".db")
+	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Document{}, ErrNotFound
 		}
-		return Document{}, fmt.Errorf("read document: %w", err)
+		return Document{}, fmt.Errorf("inspect database: %w", err)
 	}
-	if !sonic.ConfigDefault.Valid(data) {
-		return Document{}, fmt.Errorf("%w: stored document %s/%s/%s is corrupt", ErrInvalidJSON, database, collection, id)
+
+	db, err := s.getDB(database)
+	if err != nil {
+		return Document{}, err
 	}
-	s.cache.Set(key, data)
-	return Document{ID: id, Document: stdjson.RawMessage(data)}, nil
+
+	var docData []byte
+	err = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(collection))
+		if b == nil {
+			return ErrNotFound
+		}
+		v := b.Get([]byte(id))
+		if v == nil {
+			return ErrNotFound
+		}
+		// Copy bytes
+		docData = make([]byte, len(v))
+		copy(docData, v)
+		return nil
+	})
+
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return Document{}, ErrNotFound
+		}
+		return Document{}, fmt.Errorf("get document: %w", err)
+	}
+
+	return Document{ID: id, Document: stdjson.RawMessage(docData)}, nil
 }
