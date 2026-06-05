@@ -5,11 +5,15 @@ JSONVault is a high-performance JSON document database implemented in Go. It use
 ## Features
 
 - High-performance `bbolt` embedded Key-Value engine for data storage.
+- **Secondary Indexing:** Lock-free, nested-bucket O(1) indexes for lightning-fast queries.
+- **At-Rest Encryption:** Native AES-GCM application-level value encryption.
 - Native ACID transactions and file-level locking with Safe Deletion tracking.
 - Fast memory-mapped (mmap) reads with hard Query Limits to prevent OOM exhaustion.
+- **Hot Backups:** Stream point-in-time snapshots of your database without downtime.
+- **Observability:** Structured `slog` JSON logging and Prometheus metrics (`/metrics`).
 - Scoped API-key authentication (RBAC) via `JSONVAULT_API_KEYS`.
 - Optimistic Concurrency Control using `ETag` and `If-Match` headers to prevent lost updates.
-- JSON-only REST API for database, collection, and document CRUD.
+- JSON-only REST API for database, collection, document, and index CRUD.
 - Configurable address, base URL, data directory, request body limit, and server timeouts.
 
 ## Run

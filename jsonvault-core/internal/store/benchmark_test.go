@@ -66,3 +66,62 @@ func BenchmarkListDocuments(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkListDocumentsWithoutIndex(b *testing.B) {
+	db, err := New(b.TempDir(), 8, nil)
+	if err != nil {
+		b.Fatalf("New: %v", err)
+	}
+	defer db.Close()
+	db.CreateDatabase("benchdb")
+	db.CreateCollection("benchdb", "users")
+
+	for i := 0; i < 1000; i++ {
+		docBody := []byte(`{"email":"user` + string(rune(i)) + `@example.com","active":true}`)
+		db.CreateDocument("benchdb", "users", docBody)
+	}
+	db.CreateDocument("benchdb", "users", []byte(`{"email":"alice@example.com","active":true}`))
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		docs, _, err := db.ListDocuments("benchdb", "users", 10, 0, map[string]string{"email": "alice@example.com"})
+		if err != nil {
+			b.Fatalf("ListDocuments: %v", err)
+		}
+		if len(docs) != 1 {
+			b.Fatalf("expected 1 doc, got %d", len(docs))
+		}
+	}
+}
+
+func BenchmarkListDocumentsWithIndex(b *testing.B) {
+	db, err := New(b.TempDir(), 8, nil)
+	if err != nil {
+		b.Fatalf("New: %v", err)
+	}
+	defer db.Close()
+	db.CreateDatabase("benchdb")
+	db.CreateCollection("benchdb", "users")
+	
+	// Create index BEFORE inserting documents
+	if err := db.CreateIndex("benchdb", "users", "email"); err != nil {
+		b.Fatalf("CreateIndex: %v", err)
+	}
+
+	for i := 0; i < 1000; i++ {
+		docBody := []byte(`{"email":"user` + string(rune(i)) + `@example.com","active":true}`)
+		db.CreateDocument("benchdb", "users", docBody)
+	}
+	db.CreateDocument("benchdb", "users", []byte(`{"email":"alice@example.com","active":true}`))
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		docs, _, err := db.ListDocuments("benchdb", "users", 10, 0, map[string]string{"email": "alice@example.com"})
+		if err != nil {
+			b.Fatalf("ListDocuments: %v", err)
+		}
+		if len(docs) != 1 {
+			b.Fatalf("expected 1 doc, got %d", len(docs))
+		}
+	}
+}

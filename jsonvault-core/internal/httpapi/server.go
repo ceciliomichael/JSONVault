@@ -26,6 +26,11 @@ type Store interface {
 	PutDocument(database, collection, id string, body []byte, expectedETag string) (store.Document, error)
 	PatchDocument(database, collection, id string, body []byte, expectedETag string) (store.Document, error)
 	DeleteDocument(database, collection, id string, expectedETag string) error
+	
+	ListIndexes(database, collection string) ([]string, error)
+	CreateIndex(database, collection, field string) error
+	DeleteIndex(database, collection, field string) error
+
 	BackupDatabase(database string, w io.Writer) error
 }
 
@@ -102,6 +107,10 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 
 		v1.GET("/:database/:collection", server.handleCollectionDocuments)
 		v1.POST("/:database/:collection", server.handleCollectionDocuments)
+
+		v1.GET("/:database/:collection/indexes", server.handleListIndexes)
+		v1.POST("/:database/:collection/indexes", server.handleCreateIndex)
+		v1.DELETE("/:database/:collection/indexes/:field", server.handleDeleteIndex)
 
 		v1.GET("/:database/:collection/:id", server.handleDocumentByID)
 		v1.PUT("/:database/:collection/:id", server.handleDocumentByID)

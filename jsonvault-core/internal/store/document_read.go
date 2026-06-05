@@ -46,47 +46,116 @@ func (s *Store) ListDocuments(database, collection string, limit, offset int, fi
 			return ErrNotFound
 		}
 
-		c := b.Cursor()
-		
 		total = b.Stats().KeyN
 
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			if len(documents) >= limit {
-				if len(filter) == 0 {
+		var indexedField, indexedValue string
+		if len(filter) > 0 {
+			indexes := getIndexedFieldsTx(tx, collection)
+			for _, idx := range indexes {
+				if val, ok := filter[idx]; ok {
+					indexedField = idx
+					indexedValue = val
 					break
 				}
 			}
+		}
 
-			plaintext, err := decryptDocument(v, s.encryptionKey)
-			if err != nil {
-				return fmt.Errorf("corrupt document (decrypt): %w", err)
-			}
-
-			matches := true
-			if len(filter) > 0 {
-				var parsed map[string]interface{}
-				if err := sonic.Unmarshal(plaintext, &parsed); err == nil {
-					for fk, fv := range filter {
-						val, exists := parsed[fk]
-						if !exists || fmt.Sprintf("%v", val) != fv {
-							matches = false
+		if indexedField != "" {
+			// Fast path: use secondary index
+			idxBucketName := getIndexBucketName(collection, indexedField)
+			idxBucket := tx.Bucket(idxBucketName)
+			if idxBucket != nil {
+				valBucket := idxBucket.Bucket([]byte(indexedValue))
+				if valBucket != nil {
+					c := valBucket.Cursor()
+					for k, _ := c.First(); k != nil; k, _ = c.Next() {
+						if len(documents) >= limit && len(filter) == 1 {
 							break
 						}
+
+						v := b.Get(k)
+						if v == nil {
+							continue
+						}
+
+						plaintext, err := decryptDocument(v, s.encryptionKey)
+						if err != nil {
+							continue
+						}
+
+						matches := true
+						if len(filter) > 1 {
+							var parsed map[string]interface{}
+							if err := sonic.Unmarshal(plaintext, &parsed); err == nil {
+								for fk, fv := range filter {
+									if fk == indexedField {
+										continue
+									}
+									val, exists := parsed[fk]
+									if !exists || fmt.Sprintf("%v", val) != fv {
+										matches = false
+										break
+									}
+								}
+							} else {
+								matches = false
+							}
+						}
+
+						if matches {
+							if matched >= offset && len(documents) < limit {
+								documents = append(documents, Document{
+									ID:       string(k),
+									Document: stdjson.RawMessage(plaintext),
+									ETag:     computeETag(plaintext),
+								})
+							}
+							matched++
+						}
 					}
-				} else {
-					matches = false
 				}
 			}
-
-			if matches {
-				if matched >= offset && len(documents) < limit {
-					documents = append(documents, Document{
-						ID:       string(k),
-						Document: stdjson.RawMessage(plaintext),
-						ETag:     computeETag(plaintext),
-					})
+		} else {
+			// Slow path: full collection scan
+			c := b.Cursor()
+			for k, v := c.First(); k != nil; k, v = c.Next() {
+				if len(documents) >= limit {
+					if len(filter) == 0 {
+						break
+					}
 				}
-				matched++
+
+				plaintext, err := decryptDocument(v, s.encryptionKey)
+				if err != nil {
+					return fmt.Errorf("corrupt document (decrypt): %w", err)
+				}
+
+				matches := true
+				if len(filter) > 0 {
+					var parsed map[string]interface{}
+					if err := sonic.Unmarshal(plaintext, &parsed); err == nil {
+						for fk, fv := range filter {
+							val, exists := parsed[fk]
+							if !exists || fmt.Sprintf("%v", val) != fv {
+								matches = false
+								break
+							}
+						}
+					} else {
+						matches = false
+					}
+				}
+
+				if matches {
+					if matched >= offset && len(documents) < limit {
+						documents = append(documents, Document{
+							ID:       string(k),
+							Document: stdjson.RawMessage(plaintext),
+							ETag:     computeETag(plaintext),
+						})
+					}
+					matched++
+				}
 			}
 		}
 		return nil

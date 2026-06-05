@@ -50,7 +50,10 @@ func (s *Store) CreateDocument(database, collection string, body []byte) (Docume
 			}
 		}
 
-		return b.Put([]byte(id), encryptedData)
+		if err := b.Put([]byte(id), encryptedData); err != nil {
+			return err
+		}
+		return indexDocumentTx(tx, collection, id, data)
 	})
 
 	if err != nil {
@@ -102,7 +105,13 @@ func (s *Store) PutDocument(database, collection, id string, body []byte, expect
 		if expectedETag != "" && computeETag(existingPlaintext) != expectedETag {
 			return ErrPreconditionFailed
 		}
-		return b.Put([]byte(id), encryptedData)
+		if err := unindexDocumentTx(tx, collection, id, existingPlaintext); err != nil {
+			return fmt.Errorf("unindex old document: %w", err)
+		}
+		if err := b.Put([]byte(id), encryptedData); err != nil {
+			return err
+		}
+		return indexDocumentTx(tx, collection, id, data)
 	})
 
 	if err != nil {
@@ -183,7 +192,13 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte, expe
 			return err
 		}
 
-		return b.Put([]byte(id), encryptedData)
+		if err := unindexDocumentTx(tx, collection, id, existingPlaintext); err != nil {
+			return fmt.Errorf("unindex old document: %w", err)
+		}
+		if err := b.Put([]byte(id), encryptedData); err != nil {
+			return err
+		}
+		return indexDocumentTx(tx, collection, id, data)
 	})
 
 	if err != nil {
@@ -230,7 +245,10 @@ func (s *Store) DeleteDocument(database, collection, id string, expectedETag str
 		if expectedETag != "" && computeETag(existingPlaintext) != expectedETag {
 			return ErrPreconditionFailed
 		}
-		return b.Delete([]byte(id))
+		if err := b.Delete([]byte(id)); err != nil {
+			return err
+		}
+		return unindexDocumentTx(tx, collection, id, existingPlaintext)
 	})
 
 	if err != nil {
