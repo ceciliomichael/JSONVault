@@ -16,7 +16,7 @@ import (
 func (s *Server) handleCollectionDocuments(c *gin.Context) {
 	database := c.Param("database")
 	collection := c.Param("collection")
-	
+
 	switch c.Request.Method {
 	case http.MethodGet:
 		if !s.hasScope(c, auth.ScopeReadOnly) {
@@ -58,7 +58,7 @@ func (s *Server) handleCollectionDocuments(c *gin.Context) {
 			return
 		}
 
-		documents, total, err := s.store.ListDocuments(database, collection, limit, offset, filter)
+		documents, total, err := s.store.ListDocuments(c.Request.Context(), database, collection, limit, offset, filter)
 		if err != nil {
 			s.handleStoreError(c, err)
 			return
@@ -94,7 +94,7 @@ func (s *Server) handleDocumentByID(c *gin.Context) {
 	database := c.Param("database")
 	collection := c.Param("collection")
 	id := c.Param("id")
-	
+
 	switch c.Request.Method {
 	case http.MethodGet:
 		if !s.hasScope(c, auth.ScopeReadOnly) {
@@ -176,7 +176,7 @@ func (s *Server) readDocumentBodyGin(c *gin.Context) ([]byte, bool) {
 		c.JSON(http.StatusUnsupportedMediaType, gin.H{"error": gin.H{"code": "unsupported_media_type", "message": "Content-Type must be application/json"}})
 		return nil, false
 	}
-	
+
 	body := http.MaxBytesReader(c.Writer, c.Request.Body, s.maxBodyBytes)
 	defer body.Close()
 

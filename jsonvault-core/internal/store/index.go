@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -31,8 +32,6 @@ func encodeIndexValue(val interface{}) string {
 		return "u:" + fmt.Sprintf("%v", v)
 	}
 }
-
-
 
 // getIndexesMetaBucketName returns the metadata bucket name
 func getIndexesMetaBucketName() []byte {
@@ -87,7 +86,11 @@ func (s *Store) ListIndexes(database, collection string) ([]string, error) {
 }
 
 // CreateIndex creates an index on a specific field for a collection and backfills it.
-func (s *Store) CreateIndex(database, collection, field string) error {
+func (s *Store) CreateIndex(ctx context.Context, database, collection, field string) error {
+	ctx = contextOrBackground(ctx)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := ValidateDatabaseName(database); err != nil {
 		return err
 	}
@@ -104,6 +107,9 @@ func (s *Store) CreateIndex(database, collection, field string) error {
 	}
 
 	return db.Update(func(tx *bolt.Tx) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		// Ensure collection exists
 		colBucket := tx.Bucket([]byte(collection))
 		if colBucket == nil {
@@ -149,6 +155,9 @@ func (s *Store) CreateIndex(database, collection, field string) error {
 		// 3. Backfill index with existing documents
 		c := colBucket.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			// Decrypt if necessary
 			plaintext, err := decryptDocument(v, s.encryptionKey)
 			if err != nil {
@@ -166,13 +175,13 @@ func (s *Store) CreateIndex(database, collection, field string) error {
 			}
 
 			strVal := encodeIndexValue(val)
-			
+
 			// Get or create nested bucket for this specific value
 			valBucket, err := idxBucket.CreateBucketIfNotExists([]byte(strVal))
 			if err != nil {
 				return err
 			}
-			
+
 			// Store Document ID -> nil in the nested bucket
 			if err := valBucket.Put(k, nil); err != nil {
 				return err

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"jsonvault/internal/auth"
@@ -135,6 +136,15 @@ func TestAPIRejectsInvalidDocumentJSON(t *testing.T) {
 	response := doJSON(t, handler, http.MethodPost, "/api/v1/testdb/users", `not-json`)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d body=%s", response.Code, http.StatusBadRequest, response.Body.String())
+	}
+}
+
+func TestAPIRejectsOversizedManagementBody(t *testing.T) {
+	handler := testHandler(t)
+
+	response := doJSON(t, handler, http.MethodPost, "/api/v1/databases", `{"name":"`+strings.Repeat("x", 2048)+`"}`)
+	if response.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d body=%s", response.Code, http.StatusRequestEntityTooLarge, response.Body.String())
 	}
 }
 

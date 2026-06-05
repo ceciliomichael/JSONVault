@@ -1,20 +1,40 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	
+
 	"jsonvault/internal/store"
 )
+
+const statusClientClosedRequest = 499
 
 type createNameRequest struct {
 	Name string `json:"name"`
 }
 
+func (s *Server) bindJSON(c *gin.Context, out any) bool {
+	if err := c.ShouldBindJSON(out); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": gin.H{"code": "payload_too_large", "message": "request body exceeds maximum size"}})
+			return false
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "bad_request", "message": "request body must be valid JSON"}})
+		return false
+	}
+	return true
+}
+
 func (s *Server) handleStoreError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, context.Canceled):
+		c.JSON(statusClientClosedRequest, gin.H{"error": gin.H{"code": "request_cancelled", "message": "request was cancelled"}})
+	case errors.Is(err, context.DeadlineExceeded):
+		c.JSON(http.StatusGatewayTimeout, gin.H{"error": gin.H{"code": "request_timeout", "message": "request timed out"}})
 	case errors.Is(err, store.ErrNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"code": "not_found", "message": "resource not found"}})
 	case errors.Is(err, store.ErrInvalidName), errors.Is(err, store.ErrReservedName):

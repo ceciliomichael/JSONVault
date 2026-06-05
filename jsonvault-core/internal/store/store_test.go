@@ -1,6 +1,8 @@
 package store
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -57,7 +59,7 @@ func TestStoreDocumentCRUDPersistsJSON(t *testing.T) {
 		t.Fatalf("unexpected updated document: %s", updated.Document)
 	}
 
-	documents, _, err := db.ListDocuments("testdb", "users", 100, 0, nil)
+	documents, _, err := db.ListDocuments(context.Background(), "testdb", "users", 100, 0, nil)
 	if err != nil {
 		t.Fatalf("ListDocuments: %v", err)
 	}
@@ -181,7 +183,7 @@ func TestStoreConcurrentCreatesStayValid(t *testing.T) {
 		}
 	}
 
-	documents, _, err := db.ListDocuments("testdb", "events", 100, 0, nil)
+	documents, _, err := db.ListDocuments(context.Background(), "testdb", "events", 100, 0, nil)
 	if err != nil {
 		t.Fatalf("ListDocuments: %v", err)
 	}
@@ -192,5 +194,71 @@ func TestStoreConcurrentCreatesStayValid(t *testing.T) {
 		if !json.Valid(document.Document) {
 			t.Fatalf("invalid stored JSON for %s: %s", document.ID, document.Document)
 		}
+	}
+}
+
+func TestStoreLongOperationsRespectCanceledContext(t *testing.T) {
+	db, err := New(t.TempDir(), 8, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.CreateDocument("testdb", "events", []byte(`{"type":"signup"}`)); err != nil {
+		t.Fatalf("CreateDocument: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, _, err := db.ListDocuments(ctx, "testdb", "events", 100, 0, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ListDocuments error = %v, want context.Canceled", err)
+	}
+	if err := db.CreateIndex(ctx, "testdb", "events", "type"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("CreateIndex error = %v, want context.Canceled", err)
+	}
+	if err := db.BackupDatabase(ctx, "testdb", bytes.NewBuffer(nil)); !errors.Is(err, context.Canceled) {
+		t.Fatalf("BackupDatabase error = %v, want context.Canceled", err)
+	}
+}
+
+func TestListCollectionsHidesInternalBuckets(t *testing.T) {
+	db, err := New(t.TempDir(), 8, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.CreateDocument("testdb", "events", []byte(`{"type":"signup"}`)); err != nil {
+		t.Fatalf("CreateDocument: %v", err)
+	}
+	if err := db.CreateIndex(context.Background(), "testdb", "events", "type"); err != nil {
+		t.Fatalf("CreateIndex: %v", err)
+	}
+
+	collections, err := db.ListCollections("testdb")
+	if err != nil {
+		t.Fatalf("ListCollections: %v", err)
+	}
+	if len(collections) != 1 || collections[0] != "events" {
+		t.Fatalf("unexpected collections: %#v", collections)
+	}
+}
+
+func TestStoreEvictsDatabaseHandlesSynchronously(t *testing.T) {
+	db, err := New(t.TempDir(), 1, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.CreateDocument("db1", "events", []byte(`{"n":1}`)); err != nil {
+		t.Fatalf("CreateDocument db1: %v", err)
+	}
+	if _, err := db.CreateDocument("db2", "events", []byte(`{"n":2}`)); err != nil {
+		t.Fatalf("CreateDocument db2: %v", err)
+	}
+	if _, err := db.CreateDocument("db1", "events", []byte(`{"n":3}`)); err != nil {
+		t.Fatalf("reopen evicted db1: %v", err)
 	}
 }

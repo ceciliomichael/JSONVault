@@ -1,14 +1,15 @@
 package httpapi
 
 import (
-	"net/http"
+	"context"
 	"io"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
-	
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"jsonvault/internal/auth"
 	"jsonvault/internal/store"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const defaultMaxBodyBytes int64 = 10 * 1024 * 1024
@@ -21,17 +22,17 @@ type Store interface {
 	ListCollections(database string) ([]string, error)
 	DeleteCollection(database, collection string) error
 	CreateDocument(database, collection string, body []byte) (store.Document, error)
-	ListDocuments(database, collection string, limit, offset int, filter map[string]interface{}) ([]store.Document, int, error)
+	ListDocuments(ctx context.Context, database, collection string, limit, offset int, filter map[string]interface{}) ([]store.Document, int, error)
 	GetDocument(database, collection, id string) (store.Document, error)
 	PutDocument(database, collection, id string, body []byte, expectedETag string) (store.Document, error)
 	PatchDocument(database, collection, id string, body []byte, expectedETag string) (store.Document, error)
 	DeleteDocument(database, collection, id string, expectedETag string) error
-	
+
 	ListIndexes(database, collection string) ([]string, error)
-	CreateIndex(database, collection, field string) error
+	CreateIndex(ctx context.Context, database, collection, field string) error
 	DeleteIndex(database, collection, field string) error
 
-	BackupDatabase(database string, w io.Writer) error
+	BackupDatabase(ctx context.Context, database string, w io.Writer) error
 }
 
 type Options struct {
@@ -58,6 +59,7 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(MetricsMiddleware())
+	r.Use(maxBodyBytesMiddleware(maxBodyBytes))
 
 	if authenticator == nil {
 		panic("NewHandler requires a non-nil authenticator. For testing, use NewUnauthenticatedHandler.")
@@ -138,6 +140,7 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(maxBodyBytesMiddleware(maxBodyBytes))
 
 	r.Use(func(c *gin.Context) {
 		// Mock admin scope for tests
@@ -175,6 +178,15 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 	return r
 }
 
+func maxBodyBytesMiddleware(maxBodyBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Body != nil && maxBodyBytes > 0 {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
+		}
+		c.Next()
+	}
+}
+
 func (s *Server) hasScope(c *gin.Context, required auth.Scope) bool {
 	val, exists := c.Get("scope")
 	if !exists {
@@ -184,7 +196,7 @@ func (s *Server) hasScope(c *gin.Context, required auth.Scope) bool {
 	if !ok {
 		return false
 	}
-	
+
 	switch scope {
 	case auth.ScopeAdmin:
 		return true
@@ -229,12 +241,12 @@ func (s *Server) handleBackupDatabase(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
-	
+
 	database := c.Param("database")
 	c.Header("Content-Type", "application/octet-stream")
 	c.Header("Content-Disposition", `attachment; filename="`+database+`.db"`)
-	
-	if err := s.store.BackupDatabase(database, c.Writer); err != nil {
+
+	if err := s.store.BackupDatabase(c.Request.Context(), database, c.Writer); err != nil {
 		// Cannot send JSON error if we already started writing headers/body
 		// We can just log or abort
 		c.AbortWithError(http.StatusInternalServerError, err)

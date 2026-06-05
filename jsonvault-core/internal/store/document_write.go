@@ -1,10 +1,10 @@
 package store
 
 import (
+	stdjson "encoding/json"
 	"errors"
 	"fmt"
-	stdjson "encoding/json"
-	
+
 	"github.com/bytedance/sonic"
 	bolt "go.etcd.io/bbolt"
 )
@@ -50,6 +50,9 @@ func (s *Store) CreateDocument(database, collection string, body []byte) (Docume
 			}
 		}
 
+		if err := incrementCollectionCountTx(tx, collection, 1, b); err != nil {
+			return err
+		}
 		if err := b.Put([]byte(id), encryptedData); err != nil {
 			return err
 		}
@@ -96,7 +99,7 @@ func (s *Store) PutDocument(database, collection, id string, body []byte, expect
 		if existingData == nil {
 			return ErrNotFound
 		}
-		
+
 		existingPlaintext, err := decryptDocument(existingData, s.encryptionKey)
 		if err != nil {
 			return fmt.Errorf("corrupt document (decrypt): %w", err)
@@ -236,7 +239,7 @@ func (s *Store) DeleteDocument(database, collection, id string, expectedETag str
 		if existingData == nil {
 			return ErrNotFound
 		}
-		
+
 		existingPlaintext, err := decryptDocument(existingData, s.encryptionKey)
 		if err != nil {
 			return fmt.Errorf("corrupt document (decrypt): %w", err)
@@ -244,6 +247,9 @@ func (s *Store) DeleteDocument(database, collection, id string, expectedETag str
 
 		if expectedETag != "" && computeETag(existingPlaintext) != expectedETag {
 			return ErrPreconditionFailed
+		}
+		if err := incrementCollectionCountTx(tx, collection, -1, b); err != nil {
+			return err
 		}
 		if err := b.Delete([]byte(id)); err != nil {
 			return err

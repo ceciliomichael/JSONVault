@@ -46,12 +46,11 @@ func (s *Server) handleCreateIndex(c *gin.Context) {
 	collection := c.Param("collection")
 
 	var req createIndexRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+	if !s.bindJSON(c, &req) {
 		return
 	}
 
-	if err := s.store.CreateIndex(database, collection, req.Field); err != nil {
+	if err := s.store.CreateIndex(c.Request.Context(), database, collection, req.Field); err != nil {
 		s.handleStoreError(c, err)
 		return
 	}

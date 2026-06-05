@@ -31,6 +31,9 @@ func (s *Store) CreateCollection(database, collection string) (bool, error) {
 			if err != nil {
 				return err
 			}
+			if err := putCollectionCountTx(tx, collection, 0); err != nil {
+				return err
+			}
 			created = true
 		}
 		return nil
@@ -63,7 +66,11 @@ func (s *Store) ListCollections(database string) ([]string, error) {
 	var collections []string
 	err = db.View(func(tx *bolt.Tx) error {
 		return tx.ForEach(func(name []byte, _ *bolt.Bucket) error {
-			collections = append(collections, string(name))
+			collectionName := string(name)
+			if isInternalBucketName(collectionName) {
+				return nil
+			}
+			collections = append(collections, collectionName)
 			return nil
 		})
 	})
@@ -106,14 +113,22 @@ func (s *Store) DeleteCollection(database, collection string) error {
 		for _, field := range indexes {
 			idxBucketName := getIndexBucketName(collection, field)
 			if tx.Bucket(idxBucketName) != nil {
-				_ = tx.DeleteBucket(idxBucketName)
+				if err := tx.DeleteBucket(idxBucketName); err != nil {
+					return err
+				}
 			}
 		}
 
 		// Clean up index metadata
 		metaBucket := tx.Bucket(getIndexesMetaBucketName())
 		if metaBucket != nil {
-			_ = metaBucket.Delete([]byte(collection))
+			if err := metaBucket.Delete([]byte(collection)); err != nil {
+				return err
+			}
+		}
+
+		if err := deleteCollectionCountTx(tx, collection); err != nil {
+			return err
 		}
 
 		return tx.DeleteBucket([]byte(collection))

@@ -2,7 +2,7 @@ package httpapi
 
 import (
 	"net/http"
-	
+
 	"github.com/gin-gonic/gin"
 	"jsonvault/internal/auth"
 )
@@ -26,8 +26,7 @@ func (s *Server) handleDatabases(c *gin.Context) {
 			return
 		}
 		var req createNameRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "bad_request", "message": "request body must be valid JSON"}})
+		if !s.bindJSON(c, &req) {
 			return
 		}
 		created, err := s.store.CreateDatabase(req.Name)

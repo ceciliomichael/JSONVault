@@ -1,17 +1,22 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	
+
 	stdjson "encoding/json"
 	"github.com/bytedance/sonic"
 	bolt "go.etcd.io/bbolt"
 )
 
-func (s *Store) ListDocuments(database, collection string, limit, offset int, filter map[string]interface{}) ([]Document, int, error) {
+func (s *Store) ListDocuments(ctx context.Context, database, collection string, limit, offset int, filter map[string]interface{}) ([]Document, int, error) {
+	ctx = contextOrBackground(ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
 	if err := ValidateDatabaseName(database); err != nil {
 		return nil, 0, err
 	}
@@ -41,12 +46,15 @@ func (s *Store) ListDocuments(database, collection string, limit, offset int, fi
 	var matched int
 
 	err = db.View(func(tx *bolt.Tx) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		b := tx.Bucket([]byte(collection))
 		if b == nil {
 			return ErrNotFound
 		}
 
-		total = b.Stats().KeyN
+		total = getCollectionCountTx(tx, collection, b)
 
 		var indexedField, indexedValue string
 		if len(filter) > 0 {
@@ -68,12 +76,15 @@ func (s *Store) ListDocuments(database, collection string, limit, offset int, fi
 				valBucket := idxBucket.Bucket([]byte(indexedValue))
 				if valBucket != nil {
 					c := valBucket.Cursor()
-					
+
 					if len(filter) == 1 {
 						// Single filter exact match: all items in this bucket match.
 						matched = valBucket.Stats().KeyN
 						var seen int
 						for k, _ := c.First(); k != nil; k, _ = c.Next() {
+							if err := ctx.Err(); err != nil {
+								return err
+							}
 							if len(documents) >= limit {
 								break
 							}
@@ -97,6 +108,9 @@ func (s *Store) ListDocuments(database, collection string, limit, offset int, fi
 					} else {
 						// Multi-filter: need to decrypt and evaluate remaining filters
 						for k, _ := c.First(); k != nil; k, _ = c.Next() {
+							if err := ctx.Err(); err != nil {
+								return err
+							}
 							v := b.Get(k)
 							if v == nil {
 								continue
@@ -141,6 +155,9 @@ func (s *Store) ListDocuments(database, collection string, limit, offset int, fi
 			// Slow path: full collection scan
 			c := b.Cursor()
 			for k, v := c.First(); k != nil; k, v = c.Next() {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				if len(documents) >= limit {
 					if len(filter) == 0 {
 						break
@@ -192,9 +209,9 @@ func (s *Store) ListDocuments(database, collection string, limit, offset int, fi
 
 	// Deep copy required because slices inside bolt.Tx become invalid after tx closes
 	for i := range documents {
-	    clone := make([]byte, len(documents[i].Document))
-	    copy(clone, documents[i].Document)
-	    documents[i].Document = stdjson.RawMessage(clone)
+		clone := make([]byte, len(documents[i].Document))
+		copy(clone, documents[i].Document)
+		documents[i].Document = stdjson.RawMessage(clone)
 	}
 
 	if len(filter) > 0 {

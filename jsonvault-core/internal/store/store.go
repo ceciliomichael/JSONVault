@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -20,11 +21,11 @@ import (
 )
 
 type Store struct {
-	root         string
-	cacheEntries int
+	root          string
+	cacheEntries  int
 	encryptionKey []byte
-	mu           sync.RWMutex
-	dbs          map[string]*DBHandle
+	mu            sync.RWMutex
+	dbs           map[string]*DBHandle
 }
 
 type Document struct {
@@ -50,10 +51,10 @@ func New(root string, cacheEntries int, encryptionKey []byte) (*Store, error) {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
 	s := &Store{
-		root:         absRoot,
-		cacheEntries: cacheEntries,
+		root:          absRoot,
+		cacheEntries:  cacheEntries,
 		encryptionKey: encryptionKey,
-		dbs:          make(map[string]*DBHandle),
+		dbs:           make(map[string]*DBHandle),
 	}
 	return s, nil
 }
@@ -107,7 +108,8 @@ func (s *Store) getDB(database string) (*DBHandle, error) {
 		return h, nil
 	}
 
-	// LRU eviction
+	// LRU eviction. Close synchronously so immediate reopen attempts do not race
+	// the old bbolt file lock.
 	if s.cacheEntries > 0 && len(s.dbs) >= s.cacheEntries {
 		var oldest string
 		var oldestTime time.Time
@@ -123,16 +125,17 @@ func (s *Store) getDB(database string) (*DBHandle, error) {
 		if oldest != "" {
 			oldHandle := s.dbs[oldest]
 			delete(s.dbs, oldest)
-			go func() {
-				oldHandle.mu.Lock()
-				oldHandle.state = stateDeleting
-				oldHandle.mu.Unlock()
-				oldHandle.gate.Lock()
-				if oldHandle.db != nil {
-					oldHandle.db.Close()
+			oldHandle.mu.Lock()
+			oldHandle.state = stateDeleting
+			oldHandle.mu.Unlock()
+			oldHandle.gate.Lock()
+			if oldHandle.db != nil {
+				if err := oldHandle.db.Close(); err != nil {
+					oldHandle.gate.Unlock()
+					return nil, fmt.Errorf("evict database %s: %w", oldest, err)
 				}
-				oldHandle.gate.Unlock()
-			}()
+			}
+			oldHandle.gate.Unlock()
 		}
 	}
 
@@ -145,7 +148,7 @@ func (s *Store) getDB(database string) (*DBHandle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
-	
+
 	h = &DBHandle{
 		db:       db,
 		state:    stateActive,
@@ -182,7 +185,11 @@ func generateID() (string, error) {
 	return hex.EncodeToString(buf[:]), nil
 }
 
-func (s *Store) BackupDatabase(database string, w io.Writer) error {
+func (s *Store) BackupDatabase(ctx context.Context, database string, w io.Writer) error {
+	ctx = contextOrBackground(ctx)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := ValidateDatabaseName(database); err != nil {
 		return err
 	}
@@ -201,7 +208,10 @@ func (s *Store) BackupDatabase(database string, w io.Writer) error {
 	}
 
 	return db.View(func(tx *bolt.Tx) error {
-		_, err := tx.WriteTo(w)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		_, err := tx.WriteTo(contextWriter{ctx: ctx, w: w})
 		return err
 	})
 }
