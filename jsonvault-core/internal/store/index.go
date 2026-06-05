@@ -32,24 +32,7 @@ func encodeIndexValue(val interface{}) string {
 	}
 }
 
-func parseFilterValue(s string) interface{} {
-	if s == "true" {
-		return true
-	}
-	if s == "false" {
-		return false
-	}
-	if s == "null" {
-		return nil
-	}
-	if f, err := strconv.ParseFloat(s, 64); err == nil {
-		return f
-	}
-	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		return s[1 : len(s)-1]
-	}
-	return s
-}
+
 
 // getIndexesMetaBucketName returns the metadata bucket name
 func getIndexesMetaBucketName() []byte {
@@ -169,7 +152,7 @@ func (s *Store) CreateIndex(database, collection, field string) error {
 			// Decrypt if necessary
 			plaintext, err := decryptDocument(v, s.encryptionKey)
 			if err != nil {
-				continue // Skip corrupt documents during backfill
+				return fmt.Errorf("corrupt document (decrypt): %w", err)
 			}
 
 			var parsed map[string]interface{}

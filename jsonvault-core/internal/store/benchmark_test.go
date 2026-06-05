@@ -60,7 +60,7 @@ func BenchmarkListDocuments(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _, err := db.ListDocuments("benchdb", "users", 100, 0, nil)
+		_, _, err := db.ListDocuments("benchdb", "users", 100, 0, map[string]interface{}{})
 		if err != nil {
 			b.Fatalf("ListDocuments: %v", err)
 		}
@@ -84,7 +84,7 @@ func BenchmarkListDocumentsWithoutIndex(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		docs, _, err := db.ListDocuments("benchdb", "users", 10, 0, map[string]string{"email": "alice@example.com"})
+		docs, _, err := db.ListDocuments("benchdb", "users", 10, 0, map[string]interface{}{"email": "alice@example.com"})
 		if err != nil {
 			b.Fatalf("ListDocuments: %v", err)
 		}
@@ -116,7 +116,7 @@ func BenchmarkListDocumentsWithIndex(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		docs, _, err := db.ListDocuments("benchdb", "users", 10, 0, map[string]string{"email": "alice@example.com"})
+		docs, _, err := db.ListDocuments("benchdb", "users", 10, 0, map[string]interface{}{"email": "alice@example.com"})
 		if err != nil {
 			b.Fatalf("ListDocuments: %v", err)
 		}

@@ -11,7 +11,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-func (s *Store) ListDocuments(database, collection string, limit, offset int, filter map[string]string) ([]Document, int, error) {
+func (s *Store) ListDocuments(database, collection string, limit, offset int, filter map[string]interface{}) ([]Document, int, error) {
 	if err := ValidateDatabaseName(database); err != nil {
 		return nil, 0, err
 	}
@@ -54,7 +54,7 @@ func (s *Store) ListDocuments(database, collection string, limit, offset int, fi
 			for _, idx := range indexes {
 				if val, ok := filter[idx]; ok {
 					indexedField = idx
-					indexedValue = encodeIndexValue(parseFilterValue(val))
+					indexedValue = encodeIndexValue(val)
 					break
 				}
 			}
@@ -68,23 +68,45 @@ func (s *Store) ListDocuments(database, collection string, limit, offset int, fi
 				valBucket := idxBucket.Bucket([]byte(indexedValue))
 				if valBucket != nil {
 					c := valBucket.Cursor()
-					for k, _ := c.First(); k != nil; k, _ = c.Next() {
-						if len(documents) >= limit && len(filter) == 1 {
-							break
+					
+					if len(filter) == 1 {
+						// Single filter exact match: all items in this bucket match.
+						matched = valBucket.Stats().KeyN
+						var seen int
+						for k, _ := c.First(); k != nil; k, _ = c.Next() {
+							if len(documents) >= limit {
+								break
+							}
+							if seen >= offset {
+								v := b.Get(k)
+								if v == nil {
+									continue
+								}
+								plaintext, err := decryptDocument(v, s.encryptionKey)
+								if err != nil {
+									return fmt.Errorf("corrupt document (decrypt): %w", err)
+								}
+								documents = append(documents, Document{
+									ID:       string(k),
+									Document: stdjson.RawMessage(plaintext),
+									ETag:     computeETag(plaintext),
+								})
+							}
+							seen++
 						}
+					} else {
+						// Multi-filter: need to decrypt and evaluate remaining filters
+						for k, _ := c.First(); k != nil; k, _ = c.Next() {
+							v := b.Get(k)
+							if v == nil {
+								continue
+							}
+							plaintext, err := decryptDocument(v, s.encryptionKey)
+							if err != nil {
+								return fmt.Errorf("corrupt document (decrypt): %w", err)
+							}
 
-						v := b.Get(k)
-						if v == nil {
-							continue
-						}
-
-						plaintext, err := decryptDocument(v, s.encryptionKey)
-						if err != nil {
-							continue
-						}
-
-						matches := true
-						if len(filter) > 1 {
+							matches := true
 							var parsed map[string]interface{}
 							if err := sonic.Unmarshal(plaintext, &parsed); err == nil {
 								for fk, fv := range filter {
@@ -92,7 +114,7 @@ func (s *Store) ListDocuments(database, collection string, limit, offset int, fi
 										continue
 									}
 									val, exists := parsed[fk]
-									if !exists || encodeIndexValue(val) != encodeIndexValue(parseFilterValue(fv)) {
+									if !exists || encodeIndexValue(val) != encodeIndexValue(fv) {
 										matches = false
 										break
 									}
@@ -100,17 +122,17 @@ func (s *Store) ListDocuments(database, collection string, limit, offset int, fi
 							} else {
 								matches = false
 							}
-						}
 
-						if matches {
-							if matched >= offset && len(documents) < limit {
-								documents = append(documents, Document{
-									ID:       string(k),
-									Document: stdjson.RawMessage(plaintext),
-									ETag:     computeETag(plaintext),
-								})
+							if matches {
+								if matched >= offset && len(documents) < limit {
+									documents = append(documents, Document{
+										ID:       string(k),
+										Document: stdjson.RawMessage(plaintext),
+										ETag:     computeETag(plaintext),
+									})
+								}
+								matched++
 							}
-							matched++
 						}
 					}
 				}
@@ -136,7 +158,7 @@ func (s *Store) ListDocuments(database, collection string, limit, offset int, fi
 					if err := sonic.Unmarshal(plaintext, &parsed); err == nil {
 						for fk, fv := range filter {
 							val, exists := parsed[fk]
-							if !exists || encodeIndexValue(val) != encodeIndexValue(parseFilterValue(fv)) {
+							if !exists || encodeIndexValue(val) != encodeIndexValue(fv) {
 								matches = false
 								break
 							}

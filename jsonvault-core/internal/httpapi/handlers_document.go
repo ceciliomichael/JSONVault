@@ -1,15 +1,16 @@
 package httpapi
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
-	"io"
-	"errors"
-	
+
+	"github.com/bytedance/sonic"
 	"github.com/gin-gonic/gin"
-	"jsonvault/internal/store"
 	"jsonvault/internal/auth"
+	"jsonvault/internal/store"
 )
 
 func (s *Server) handleCollectionDocuments(c *gin.Context) {
@@ -35,11 +36,16 @@ func (s *Server) handleCollectionDocuments(c *gin.Context) {
 			offset = o
 		}
 
-		filter := make(map[string]string)
+		filter := make(map[string]interface{})
 		for k, v := range query {
 			if strings.HasPrefix(k, "filter[") && strings.HasSuffix(k, "]") && len(v) > 0 {
 				key := k[7 : len(k)-1]
-				filter[key] = v[0]
+				var parsedVal interface{}
+				if err := sonic.Unmarshal([]byte(v[0]), &parsedVal); err != nil {
+					c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "bad_request", "message": "invalid JSON literal in filter for field: " + key}})
+					return
+				}
+				filter[key] = parsedVal
 			}
 		}
 
