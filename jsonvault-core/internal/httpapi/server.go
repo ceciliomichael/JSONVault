@@ -2,8 +2,9 @@ package httpapi
 
 import (
 	"net/http"
-	"strings"
 
+	"github.com/gin-gonic/gin"
+	
 	"jsonvault/internal/auth"
 	"jsonvault/internal/store"
 )
@@ -45,81 +46,77 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 		maxBodyBytes: maxBodyBytes,
 	}
 
-	var handler http.Handler = server
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+	r.Use(gin.Recovery())
+
 	if authenticator != nil {
-		handler = authenticator.Middleware(handler)
+		r.Use(func(c *gin.Context) {
+			if c.Request.URL.Path == "/healthz" {
+				c.Next()
+				return
+			}
+			if !authenticator.Authenticate(c.GetHeader("Authorization")) {
+				c.Header("WWW-Authenticate", `Bearer realm="jsonvault"`)
+				c.AbortWithStatusJSON(http.StatusUnauthorized, map[string]any{
+					"error": map[string]string{
+						"code":    "unauthorized",
+						"message": "missing or invalid bearer token",
+					},
+				})
+				return
+			}
+			c.Next()
+		})
 	}
-	handler = securityHeaders(handler)
-	return handler
+
+	r.Use(func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("Cache-Control", "no-store")
+		c.Next()
+	})
+
+	r.GET("/healthz", func(c *gin.Context) {
+		c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	})
+
+	v1 := r.Group("/api/v1")
+	{
+		v1.GET("/databases", server.handleDatabases)
+		v1.POST("/databases", server.handleDatabases)
+		v1.DELETE("/:database", server.handleDeleteDatabase)
+
+		v1.GET("/:database/collections", server.handleCollections)
+		v1.POST("/:database/collections", server.handleCollections)
+		v1.DELETE("/:database/collections/:collection", server.handleDeleteCollection)
+
+		v1.GET("/:database/:collection", server.handleCollectionDocuments)
+		v1.POST("/:database/:collection", server.handleCollectionDocuments)
+
+		v1.GET("/:database/:collection/:id", server.handleDocumentByID)
+		v1.PUT("/:database/:collection/:id", server.handleDocumentByID)
+		v1.PATCH("/:database/:collection/:id", server.handleDocumentByID)
+		v1.DELETE("/:database/:collection/:id", server.handleDocumentByID)
+	}
+
+	return r
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/healthz" {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+func (s *Server) handleDeleteDatabase(c *gin.Context) {
+	database := c.Param("database")
+	if err := s.store.DeleteDatabase(database); err != nil {
+		s.handleStoreError(c, err)
 		return
 	}
+	c.JSON(http.StatusOK, map[string]any{"deleted": true, "name": database})
+}
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/")
-	if path == r.URL.Path {
-		writeError(w, http.StatusNotFound, "not_found", "route not found")
+func (s *Server) handleDeleteCollection(c *gin.Context) {
+	database := c.Param("database")
+	collection := c.Param("collection")
+	if err := s.store.DeleteCollection(database, collection); err != nil {
+		s.handleStoreError(c, err)
 		return
 	}
-
-	if path == "databases" || path == "databases/" {
-		s.handleDatabases(w, r)
-		return
-	}
-
-	parts := routeParts(path)
-	if len(parts) == 0 {
-		writeError(w, http.StatusNotFound, "not_found", "route not found")
-		return
-	}
-
-	database := parts[0]
-
-	if len(parts) == 1 {
-		if r.Method == http.MethodDelete {
-			if err := s.store.DeleteDatabase(database); err != nil {
-				s.handleStoreError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "name": database})
-			return
-		}
-		writeMethodNotAllowed(w, http.MethodDelete)
-		return
-	}
-
-	if parts[1] == "collections" {
-		if len(parts) == 2 {
-			s.handleCollections(w, r, database)
-			return
-		}
-		if len(parts) == 3 && r.Method == http.MethodDelete {
-			collection := parts[2]
-			if err := s.store.DeleteCollection(database, collection); err != nil {
-				s.handleStoreError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "name": collection})
-			return
-		}
-		writeError(w, http.StatusNotFound, "not_found", "route not found")
-		return
-	}
-
-	collection := parts[1]
-	if len(parts) == 2 {
-		s.handleCollectionDocuments(w, r, database, collection)
-		return
-	}
-
-	if len(parts) == 3 {
-		id := parts[2]
-		s.handleDocumentByID(w, r, database, collection, id)
-		return
-	}
-
-	writeError(w, http.StatusNotFound, "not_found", "route not found")
+	c.JSON(http.StatusOK, map[string]any{"deleted": true, "name": collection})
 }

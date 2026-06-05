@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
+	stdjson "encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	
+	"github.com/bytedance/sonic"
 )
 
 type Store struct {
@@ -19,7 +21,7 @@ type Store struct {
 
 type Document struct {
 	ID       string          `json:"id"`
-	Document json.RawMessage `json:"document"`
+	Document stdjson.RawMessage `json:"document"`
 }
 
 func New(root string, cacheEntries int) (*Store, error) {
@@ -47,12 +49,12 @@ func normalizeJSON(body []byte) ([]byte, error) {
 	if len(body) == 0 {
 		return nil, ErrEmptyDocument
 	}
-	if !json.Valid(body) {
+	if !sonic.ConfigDefault.Valid(body) {
 		return nil, ErrInvalidJSON
 	}
 
 	var compacted bytes.Buffer
-	if err := json.Compact(&compacted, body); err != nil {
+	if err := stdjson.Compact(&compacted, body); err != nil {
 		return nil, ErrInvalidJSON
 	}
 	return compacted.Bytes(), nil

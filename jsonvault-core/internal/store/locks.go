@@ -1,23 +1,36 @@
 package store
 
-import "sync"
+import (
+	"hash/fnv"
+	"sync"
+)
+
+const numLocks = 256
 
 type LockManager struct {
-	locks sync.Map
+	locks [numLocks]*sync.RWMutex
 }
 
 func NewLockManager() *LockManager {
-	return &LockManager{}
+	m := &LockManager{}
+	for i := 0; i < numLocks; i++ {
+		m.locks[i] = &sync.RWMutex{}
+	}
+	return m
+}
+
+func (m *LockManager) getLock(key string) *sync.RWMutex {
+	h := fnv.New32a()
+	h.Write([]byte(key))
+	return m.locks[h.Sum32()%numLocks]
 }
 
 func (m *LockManager) ForCollection(database, collection string) *sync.RWMutex {
 	key := database + "/" + collection
-	lock, _ := m.locks.LoadOrStore(key, &sync.RWMutex{})
-	return lock.(*sync.RWMutex)
+	return m.getLock(key)
 }
 
 func (m *LockManager) ForDocument(database, collection, id string) *sync.RWMutex {
 	key := database + "/" + collection + "/" + id
-	lock, _ := m.locks.LoadOrStore(key, &sync.RWMutex{})
-	return lock.(*sync.RWMutex)
+	return m.getLock(key)
 }

@@ -2,36 +2,40 @@ package httpapi
 
 import (
 	"net/http"
+	
+	"github.com/gin-gonic/gin"
 )
 
-func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request, database string) {
-	switch r.Method {
+func (s *Server) handleCollections(c *gin.Context) {
+	database := c.Param("database")
+	switch c.Request.Method {
 	case http.MethodGet:
 		collections, err := s.store.ListCollections(database)
 		if err != nil {
-			s.handleStoreError(w, err)
+			s.handleStoreError(c, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, collections)
+		c.JSON(http.StatusOK, collections)
 	case http.MethodPost:
 		var req createNameRequest
-		if !s.decodeJSON(w, r, &req) {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "bad_request", "message": "request body must be valid JSON"}})
 			return
 		}
 		created, err := s.store.CreateCollection(database, req.Name)
 		if err != nil {
-			s.handleStoreError(w, err)
+			s.handleStoreError(c, err)
 			return
 		}
 		status := http.StatusOK
 		if created {
 			status = http.StatusCreated
 		}
-		writeJSON(w, status, map[string]any{
+		c.JSON(status, gin.H{
 			"name":    req.Name,
 			"created": created,
 		})
 	default:
-		writeMethodNotAllowed(w, http.MethodGet, http.MethodPost)
+		c.AbortWithStatus(http.StatusMethodNotAllowed)
 	}
 }
