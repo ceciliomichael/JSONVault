@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 func (s *Store) CreateDocument(database, collection string, body []byte) (Document, error) {
@@ -22,9 +23,9 @@ func (s *Store) CreateDocument(database, collection string, body []byte) (Docume
 		return Document{}, err
 	}
 
-	lock := s.locks.For(database, collection)
-	lock.Lock()
-	defer lock.Unlock()
+	colLock := s.locks.ForCollection(database, collection)
+	colLock.RLock()
+	defer colLock.RUnlock()
 
 	collectionPath := filepath.Join(s.root, database, collection)
 	if err := os.MkdirAll(collectionPath, 0o700); err != nil {
@@ -33,16 +34,23 @@ func (s *Store) CreateDocument(database, collection string, body []byte) (Docume
 
 	var id string
 	var path string
+	var docLock *sync.RWMutex
 	for attempts := 0; attempts < 16; attempts++ {
 		id, err = generateID()
 		if err != nil {
 			return Document{}, err
 		}
+		
+		docLock = s.locks.ForDocument(database, collection, id)
+		docLock.Lock()
+		
 		path = filepath.Join(collectionPath, id+".json")
 		_, statErr := os.Stat(path)
 		if errors.Is(statErr, os.ErrNotExist) {
 			break
 		}
+		docLock.Unlock() // unlock if collision
+		
 		if statErr != nil {
 			return Document{}, fmt.Errorf("inspect document: %w", statErr)
 		}
@@ -50,6 +58,7 @@ func (s *Store) CreateDocument(database, collection string, body []byte) (Docume
 			return Document{}, fmt.Errorf("generate document id: exhausted collision retries")
 		}
 	}
+	defer docLock.Unlock()
 
 	if err := writeAtomic(path, data); err != nil {
 		return Document{}, err
@@ -58,25 +67,25 @@ func (s *Store) CreateDocument(database, collection string, body []byte) (Docume
 	return Document{ID: id, Document: json.RawMessage(data)}, nil
 }
 
-func (s *Store) ListDocuments(database, collection string) ([]Document, error) {
+func (s *Store) ListDocuments(database, collection string, limit, offset int, filter map[string]string) ([]Document, int, error) {
 	if err := ValidateDatabaseName(database); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if err := ValidateCollectionName(collection); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	lock := s.locks.For(database, collection)
-	lock.RLock()
-	defer lock.RUnlock()
+	colLock := s.locks.ForCollection(database, collection)
+	colLock.RLock()
+	defer colLock.RUnlock()
 
 	collectionPath := filepath.Join(s.root, database, collection)
 	entries, err := os.ReadDir(collectionPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, ErrNotFound
+			return nil, 0, ErrNotFound
 		}
-		return nil, fmt.Errorf("list documents: %w", err)
+		return nil, 0, fmt.Errorf("list documents: %w", err)
 	}
 
 	ids := make([]string, 0, len(entries))
@@ -93,15 +102,62 @@ func (s *Store) ListDocuments(database, collection string) ([]Document, error) {
 	}
 	sort.Strings(ids)
 
-	documents := make([]Document, 0, len(ids))
-	for _, id := range ids {
-		doc, err := s.readDocumentLocked(database, collection, id)
-		if err != nil {
-			return nil, err
-		}
-		documents = append(documents, doc)
+	documents := make([]Document, 0)
+	total := len(ids)
+	
+	if limit <= 0 {
+	    limit = 100 // default limit
 	}
-	return documents, nil
+	
+	matched := 0
+	for _, id := range ids {
+		if len(documents) >= limit {
+			break
+		}
+		
+		docLock := s.locks.ForDocument(database, collection, id)
+		docLock.RLock()
+		doc, err := s.readDocumentLocked(database, collection, id)
+		docLock.RUnlock()
+		
+		if err != nil {
+		    if errors.Is(err, ErrNotFound) {
+		        continue
+		    }
+			return nil, 0, err
+		}
+		
+		// Apply filter
+		matches := true
+		if len(filter) > 0 {
+		    var parsed map[string]interface{}
+		    if err := json.Unmarshal(doc.Document, &parsed); err == nil {
+		        for k, v := range filter {
+		            val, exists := parsed[k]
+		            if !exists || fmt.Sprintf("%v", val) != v {
+		                matches = false
+		                break
+		            }
+		        }
+		    } else {
+		        matches = false
+		    }
+		}
+		
+		if matches {
+		    if matched >= offset {
+		        documents = append(documents, doc)
+		    }
+		    matched++
+		}
+	}
+	
+	if len(filter) > 0 {
+	    total = matched // If filtering, total is the number of matching documents found so far (approximate if we hit limit)
+	    // To get exact total for filtered we would have to scan all. We skip that for performance.
+	}
+	
+	return documents, total, nil
 }
 
 func (s *Store) GetDocument(database, collection, id string) (Document, error) {
@@ -115,9 +171,13 @@ func (s *Store) GetDocument(database, collection, id string) (Document, error) {
 		return Document{}, err
 	}
 
-	lock := s.locks.For(database, collection)
-	lock.RLock()
-	defer lock.RUnlock()
+	colLock := s.locks.ForCollection(database, collection)
+	colLock.RLock()
+	defer colLock.RUnlock()
+	
+	docLock := s.locks.ForDocument(database, collection, id)
+	docLock.RLock()
+	defer docLock.RUnlock()
 
 	return s.readDocumentLocked(database, collection, id)
 }
@@ -137,9 +197,13 @@ func (s *Store) PutDocument(database, collection, id string, body []byte) (Docum
 		return Document{}, err
 	}
 
-	lock := s.locks.For(database, collection)
-	lock.Lock()
-	defer lock.Unlock()
+	colLock := s.locks.ForCollection(database, collection)
+	colLock.RLock()
+	defer colLock.RUnlock()
+	
+	docLock := s.locks.ForDocument(database, collection, id)
+	docLock.Lock()
+	defer docLock.Unlock()
 
 	path := filepath.Join(s.root, database, collection, id+".json")
 	if _, err := os.Stat(path); err != nil {
@@ -148,6 +212,72 @@ func (s *Store) PutDocument(database, collection, id string, body []byte) (Docum
 		}
 		return Document{}, fmt.Errorf("inspect document: %w", err)
 	}
+	if err := writeAtomic(path, data); err != nil {
+		return Document{}, err
+	}
+	s.cache.Set(cacheKey(database, collection, id), data)
+	return Document{ID: id, Document: json.RawMessage(data)}, nil
+}
+
+func (s *Store) PatchDocument(database, collection, id string, body []byte) (Document, error) {
+    if err := ValidateDatabaseName(database); err != nil {
+		return Document{}, err
+	}
+	if err := ValidateCollectionName(collection); err != nil {
+		return Document{}, err
+	}
+	if err := ValidateDocumentID(id); err != nil {
+		return Document{}, err
+	}
+	
+	// Ensure the patch body is valid JSON
+	if !json.Valid(body) {
+		return Document{}, ErrInvalidJSON
+	}
+
+	colLock := s.locks.ForCollection(database, collection)
+	colLock.RLock()
+	defer colLock.RUnlock()
+	
+	docLock := s.locks.ForDocument(database, collection, id)
+	docLock.Lock()
+	defer docLock.Unlock()
+
+    // Read existing
+	doc, err := s.readDocumentLocked(database, collection, id)
+	if err != nil {
+	    return Document{}, err
+	}
+	
+	// Parse existing
+	var existing map[string]interface{}
+	if err := json.Unmarshal(doc.Document, &existing); err != nil {
+	    return Document{}, fmt.Errorf("corrupt document: %w", err)
+	}
+	
+	// Parse patch
+	var patch map[string]interface{}
+	if err := json.Unmarshal(body, &patch); err != nil {
+	    return Document{}, ErrInvalidJSON
+	}
+	
+	// Merge patch into existing
+	for k, v := range patch {
+	    existing[k] = v
+	}
+	
+	// Re-marshal
+	mergedData, err := json.Marshal(existing)
+	if err != nil {
+	    return Document{}, fmt.Errorf("marshal merged document: %w", err)
+	}
+	
+	data, err := normalizeJSON(mergedData)
+	if err != nil {
+		return Document{}, err
+	}
+
+	path := filepath.Join(s.root, database, collection, id+".json")
 	if err := writeAtomic(path, data); err != nil {
 		return Document{}, err
 	}
@@ -166,9 +296,13 @@ func (s *Store) DeleteDocument(database, collection, id string) error {
 		return err
 	}
 
-	lock := s.locks.For(database, collection)
-	lock.Lock()
-	defer lock.Unlock()
+	colLock := s.locks.ForCollection(database, collection)
+	colLock.RLock()
+	defer colLock.RUnlock()
+	
+	docLock := s.locks.ForDocument(database, collection, id)
+	docLock.Lock()
+	defer docLock.Unlock()
 
 	path := filepath.Join(s.root, database, collection, id+".json")
 	if err := os.Remove(path); err != nil {

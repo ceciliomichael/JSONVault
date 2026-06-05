@@ -16,7 +16,7 @@ func (s *Store) CreateCollection(database, collection string) (bool, error) {
 		return false, err
 	}
 
-	lock := s.locks.For(database, collection)
+	lock := s.locks.ForCollection(database, collection)
 	lock.Lock()
 	defer lock.Unlock()
 
@@ -73,7 +73,7 @@ func (s *Store) DeleteCollection(database, collection string) error {
 		return err
 	}
 
-	lock := s.locks.For(database, collection)
+	lock := s.locks.ForCollection(database, collection)
 	lock.Lock()
 	defer lock.Unlock()
 

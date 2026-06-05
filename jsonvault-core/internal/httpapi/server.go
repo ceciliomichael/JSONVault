@@ -18,9 +18,10 @@ type Store interface {
 	ListCollections(database string) ([]string, error)
 	DeleteCollection(database, collection string) error
 	CreateDocument(database, collection string, body []byte) (store.Document, error)
-	ListDocuments(database, collection string) ([]store.Document, error)
+	ListDocuments(database, collection string, limit, offset int, filter map[string]string) ([]store.Document, int, error)
 	GetDocument(database, collection, id string) (store.Document, error)
 	PutDocument(database, collection, id string, body []byte) (store.Document, error)
+	PatchDocument(database, collection, id string, body []byte) (store.Document, error)
 	DeleteDocument(database, collection, id string) error
 }
 

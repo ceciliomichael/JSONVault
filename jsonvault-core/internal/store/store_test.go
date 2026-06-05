@@ -58,7 +58,7 @@ func TestStoreDocumentCRUDPersistsJSON(t *testing.T) {
 		t.Fatalf("unexpected updated document: %s", updated.Document)
 	}
 
-	documents, err := db.ListDocuments("testdb", "users")
+	documents, _, err := db.ListDocuments("testdb", "users", 100, 0, nil)
 	if err != nil {
 		t.Fatalf("ListDocuments: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestStoreConcurrentCreatesStayValid(t *testing.T) {
 		}
 	}
 
-	documents, err := db.ListDocuments("testdb", "events")
+	documents, _, err := db.ListDocuments("testdb", "events", 100, 0, nil)
 	if err != nil {
 		t.Fatalf("ListDocuments: %v", err)
 	}

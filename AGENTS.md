@@ -84,3 +84,11 @@
     - Do not claim completion while known breakage remains unresolved.
   </execution_rules>
 </system_contract>
+
+<JSONVault description="How to navigate JSONVault">
+JSONVault is a NoSQL Database
+
+jsonvault-core/ - The Go server / Core Database Engine, the user will mention this as database.
+
+docs/ - The documentation part of jsonvault-core, contains integration-guide.md which is the API contract. Update as changes gets implemented.
+</JSONVault>

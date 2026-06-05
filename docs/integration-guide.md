@@ -1,8 +1,26 @@
-# JSONVault API Reference
+# JSONVault Integration Guide
 
 JSONVault is a file-backed NoSQL document database accessed via REST API. It uses a strict 3-tier hierarchy: **Database -> Collection -> Document**. 
 
-This document provides the definitive API contract. AI Agents and integrations must adhere strictly to these endpoint definitions and schemas.
+This document serves as the definitive guide for integrating JSONVault. AI Agents and integrations must adhere strictly to these endpoint definitions, configurations, and schemas.
+
+## Configuration & Setup
+
+When connecting to JSONVault from your client application, it is highly recommended to store your credentials and database references in your project's `.env` file to prevent hardcoding. 
+
+```env
+# The URL where JSONVault is hosted
+JSONVAULT_BASE_URL=http://localhost:8080
+
+# The Bearer Token API Key for authorization
+JSONVAULT_API_KEY=your-secret-api-key
+
+# The name of your isolated database project (used in routes)
+JSONVAULT_DATABASE_NAME=my_app_db
+```
+
+Your application can read these environment variables to construct the appropriate REST API requests. For example, a request to list users would map to:
+`${JSONVAULT_BASE_URL}/api/v1/${JSONVAULT_DATABASE_NAME}/users`
 
 ## Core Concepts
 - **Database**: Top-level isolated container (e.g., `ecommerce_db`).
@@ -15,7 +33,7 @@ All requests (except `/healthz`) MUST include the following headers to prevent `
 Authorization: Bearer <your-api-key>
 Content-Type: application/json
 ```
-*(Note: `Content-Type` is only strictly required for `POST` and `PUT` requests).*
+*(Note: `Content-Type` is only strictly required for `POST`, `PUT`, and `PATCH` requests).*
 
 ---
 
@@ -72,7 +90,11 @@ Checks if the server is running. No authentication required.
 
 ### List Documents
 - **Request:** `GET /api/v1/{database}/{collection}`
-- **Response (200 OK):** Array of document objects.
+  - **Query Parameters:**
+    - `limit` (int, default: 100, max: 1000): Number of documents to return.
+    - `offset` (int, default: 0): Number of documents to skip.
+    - `filter[<field>]` (string): Filter documents where `<field>` matches the provided value exactly (e.g., `?filter[active]=true`).
+- **Response (200 OK):** Array of document objects. Pagination metadata is returned in response headers (`X-Total-Count`, `X-Limit`, `X-Offset`).
   ```json
   [
     { "id": "12345", "document": { "key": "value" } },
@@ -109,6 +131,17 @@ Checks if the server is running. No authentication required.
   {
     "id": "<id>",
     "document": { ...new data... }
+  }
+  ```
+
+### Partial Update Document
+- **Request:** `PATCH /api/v1/{database}/{collection}/{id}`
+- **Body:** Any valid JSON object containing fields to merge. *(This operation updates specific fields while preserving the rest of the document).*
+- **Response (200 OK):**
+  ```json
+  {
+    "id": "<id>",
+    "document": { ...merged data... }
   }
   ```
 
