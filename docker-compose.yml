@@ -1,0 +1,10 @@
+# Root Orchestrator
+# This file is used to spin up the entire stack simultaneously.
+# It simply imports the individual, modular docker-compose files.
+
+include:
+  - jsonvault-core/docker-compose.yml
+
+# Example for future services:
+# include:
+#   - frontend/docker-compose.yml

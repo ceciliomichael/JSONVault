@@ -10,7 +10,7 @@ When connecting to JSONVault from your client application, store your credential
 
 ```env
 # The URL where the JSONVault instance is hosted
-JSONVAULT_BASE_URL=http://localhost:8080
+JSONVAULT_BASE_URL=http://localhost:5766
 
 # Your API Key for authorization
 JSONVAULT_API_KEY=your-secret-api-key

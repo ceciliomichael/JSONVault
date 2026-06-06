@@ -15,7 +15,6 @@ var ErrMissingAPIKey = errors.New("missing JSONVAULT_API_KEY or JSONVAULT_API_KE
 
 type Config struct {
 	Addr              string
-	BaseURL           string
 	DataDir           string
 	APIKeys           []string
 	CacheEntries      int
@@ -94,7 +93,6 @@ func Load() (Config, error) {
 
 	return Config{
 		Addr:              envString("JSONVAULT_ADDR", ":8080"),
-		BaseURL:           envString("JSONVAULT_BASE_URL", "http://localhost:8080"),
 		DataDir:           envString("JSONVAULT_DATA_DIR", "./data"),
 		APIKeys:           keys,
 		CacheEntries:      cacheEntries,

@@ -11,10 +11,8 @@ JSONVault requires several environment variables to operate securely. A template
 ### Server & Network
 ```env
 # The HTTP port the server listens on
-JSONVAULT_ADDR=:8080
+JSONVAULT_ADDR=:5766
 
-# The base URL where JSONVault is hosted
-JSONVAULT_BASE_URL=http://localhost:8080
 
 # Maximum request body size (in bytes, default: 10MB)
 JSONVAULT_MAX_BODY_BYTES=10485760

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -16,7 +17,7 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
 	cfg, err := config.Load()
@@ -56,7 +57,20 @@ func main() {
 
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("JSONVault starting", "addr", cfg.Addr, "dataDir", cfg.DataDir, "baseURL", cfg.BaseURL)
+		banner := `
+      _  _____  ____  _   ___      __         _ _   
+     | |/ ____|/ __ \| \ | \ \    / /        | | |  
+     | | (___ | |  | |  \| |\ \  / /_ _ _   _| | |_  
+ _   | |\___ \| |  | | . ' | \ \/ / _' | | | | | __| 
+| |__| |____) | |__| | |\  |  \  / (_| | |_| | | |_  
+ \____/|_____/ \____/|_| \_|   \/ \__,_|\__,_|_|\__| 
+
+  🚀 Server running on %s
+  📁 Data directory: %s
+
+`
+		fmt.Printf(banner, cfg.Addr, cfg.DataDir)
+
 		errCh <- server.ListenAndServe()
 	}()
 
