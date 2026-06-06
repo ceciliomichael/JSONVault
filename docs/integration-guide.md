@@ -121,6 +121,46 @@ Updates specific fields while preserving the rest (e.g. only updating `status: "
 
 ---
 
+### Schemas & Validation (Optional)
+
+JSONVault is schemaless by default! However, if you want to strictly enforce data integrity on a collection, you can apply a Draft-07 JSON Schema.
+
+#### Set or Update a Schema
+- **Request:** `PUT /api/v1/{database}/{collection}/schema`
+- **Body:** Your valid JSON Schema object.
+- **Response (200 OK):** `{"updated": true}`
+*(Note: Once a schema is set, any `POST`/`PUT`/`PATCH` that violates the schema will be immediately rejected with a `400 Bad Request`).*
+
+#### Get Current Schema
+- **Request:** `GET /api/v1/{database}/{collection}/schema`
+- **Response (200 OK):** Returns the current JSON Schema, or `{"schema": null}` if none is set.
+
+#### Delete Schema
+- **Request:** `DELETE /api/v1/{database}/{collection}/schema`
+- **Response (200 OK):** `{"deleted": true}`
+
+---
+
+### Secondary Indexes
+
+By default, queries using `?filter[...]` perform a full collection scan. For massive collections, you can create Secondary Indexes to achieve sub-millisecond lookups.
+
+#### Create an Index
+- **Request:** `POST /api/v1/{database}/{collection}/indexes`
+- **Body:** `{"field": "email"}`
+- **Response (201 Created):** `{"created": true}`
+*(Note: Creating an index automatically backfills all existing documents. The specified field will now use the B-Tree fast path during `GET` queries).*
+
+#### List Indexes
+- **Request:** `GET /api/v1/{database}/{collection}/indexes`
+- **Response (200 OK):** `{"indexes": ["email", "status"]}`
+
+#### Delete an Index
+- **Request:** `DELETE /api/v1/{database}/{collection}/indexes/{field}`
+- **Response (200 OK):** `{"deleted": true}`
+
+---
+
 ### Administrative Endpoints
 
 #### Check Server Health

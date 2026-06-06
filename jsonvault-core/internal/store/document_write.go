@@ -26,6 +26,9 @@ func (s *Store) CreateDocumentWithTTL(database, collection string, body []byte, 
 	if err != nil {
 		return Document{}, err
 	}
+	if err := s.ValidateDocument(database, collection, data); err != nil {
+		return Document{}, err
+	}
 	encryptedData, err := encryptDocument(data, s.encryptionKey)
 	if err != nil {
 		return Document{}, err
@@ -102,6 +105,9 @@ func (s *Store) PutDocumentWithTTL(database, collection, id string, body []byte,
 	}
 	data, err := normalizeJSON(body)
 	if err != nil {
+		return Document{}, err
+	}
+	if err := s.ValidateDocument(database, collection, data); err != nil {
 		return Document{}, err
 	}
 	encryptedData, err := encryptDocument(data, s.encryptionKey)
@@ -225,6 +231,9 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte, expe
 
 		data, err = normalizeJSON(mergedData)
 		if err != nil {
+			return err
+		}
+		if err := s.ValidateDocument(database, collection, data); err != nil {
 			return err
 		}
 

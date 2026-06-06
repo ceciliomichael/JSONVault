@@ -29,6 +29,18 @@ Your dashboard backend should use the Admin Key to programmatically generate res
   }
   ```
 
+### Option 2: Offline Generation (For Dashboard Backends)
+If you are building a dashboard (like Firebase/Supabase), your backend doesn't even need to hit the JSONVault API to create keys! Because JWTs are stateless, your backend can generate the token instantly using any standard JWT library in any language (Go, Python, PHP, Node.js, Ruby, etc.).
+
+**Requirements:**
+1. **Algorithm:** HMAC SHA-256 (`HS256`)
+2. **Secret:** The exact string value of your `JSONVAULT_JWT_SECRET`.
+3. **Payload:** A standard JSON object with the following fields:
+   - `scope`: String (either `"read_only"`, `"read_write"`, or `"admin"`)
+   - `database`: String (the specific database name, or `"*"` for all)
+   - `collection`: String (the specific collection name, or `"*"` for all)
+
+Once your backend signs this payload, the resulting token string is immediately valid on your JSONVault server!
 Provide this `"token"` string to the user so they can connect their frontend app to their specific database!
 
 ## Key Revocation & Expiration

@@ -22,6 +22,10 @@ type Store interface {
 	CreateCollection(database, collection string) (bool, error)
 	ListCollections(database string) ([]string, error)
 	DeleteCollection(database, collection string) error
+
+	SetSchema(database, collection string, schema []byte) error
+	GetSchema(database, collection string) ([]byte, error)
+
 	CreateDocument(database, collection string, body []byte) (store.Document, error)
 	CreateDocumentWithTTL(database, collection string, body []byte, expireIn time.Duration) (store.Document, error)
 	ListDocuments(ctx context.Context, database, collection string, limit, offset int, filter map[string]interface{}, sortField string) ([]store.Document, int, error)
@@ -133,6 +137,10 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 		v1.POST("/:database/:collection/indexes", server.handleCreateIndex)
 		v1.DELETE("/:database/:collection/indexes/:field", server.handleDeleteIndex)
 
+		v1.GET("/:database/:collection/schema", server.handleGetSchema)
+		v1.PUT("/:database/:collection/schema", server.handleSetSchema)
+		v1.DELETE("/:database/:collection/schema", server.handleSetSchema)
+
 		v1.GET("/:database/:collection/subscribe", server.handleSubscribe)
 		v1.POST("/:database/:collection/publish", server.handlePublish)
 
@@ -196,6 +204,10 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 		v1.GET("/:database/:collection/indexes", server.handleListIndexes)
 		v1.POST("/:database/:collection/indexes", server.handleCreateIndex)
 		v1.DELETE("/:database/:collection/indexes/:field", server.handleDeleteIndex)
+
+		v1.GET("/:database/:collection/schema", server.handleGetSchema)
+		v1.PUT("/:database/:collection/schema", server.handleSetSchema)
+		v1.DELETE("/:database/:collection/schema", server.handleSetSchema)
 
 		v1.GET("/:database/:collection/subscribe", server.handleSubscribe)
 		v1.POST("/:database/:collection/publish", server.handlePublish)
