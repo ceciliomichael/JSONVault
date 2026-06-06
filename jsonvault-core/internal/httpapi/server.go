@@ -26,6 +26,9 @@ type Store interface {
 	SetSchema(database, collection string, schema []byte) error
 	GetSchema(database, collection string) ([]byte, error)
 
+	SetWebhooks(database, collection string, webhooks []store.WebhookConfig) (string, error)
+	GetWebhooks(database, collection string) (*store.WebhookRecord, error)
+
 	CreateDocument(database, collection string, body []byte) (store.Document, error)
 	CreateDocumentWithTTL(database, collection string, body []byte, expireIn time.Duration) (store.Document, error)
 	ListDocuments(ctx context.Context, database, collection string, limit, offset int, filter map[string]interface{}, sortField string) ([]store.Document, int, error)
@@ -34,6 +37,8 @@ type Store interface {
 	PutDocumentWithTTL(database, collection, id string, body []byte, expectedETag string, expireIn time.Duration) (store.Document, error)
 	PatchDocument(database, collection, id string, body []byte, expectedETag string) (store.Document, error)
 	DeleteDocument(database, collection, id string, expectedETag string) error
+
+	ExecuteTransaction(database string, ops []store.TransactionOp) ([]store.Document, error)
 
 	ListIndexes(database, collection string) ([]string, error)
 	CreateIndex(ctx context.Context, database, collection, field string) error
@@ -130,6 +135,8 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 		v1.POST("/:database/collections", server.handleCollections)
 		v1.DELETE("/:database/collections/:collection", server.handleDeleteCollection)
 
+		v1.POST("/:database/transactions", server.handleTransaction)
+
 		v1.GET("/:database/:collection", server.handleCollectionDocuments)
 		v1.POST("/:database/:collection", server.handleCollectionDocuments)
 
@@ -140,6 +147,9 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 		v1.GET("/:database/:collection/schema", server.handleGetSchema)
 		v1.PUT("/:database/:collection/schema", server.handleSetSchema)
 		v1.DELETE("/:database/:collection/schema", server.handleSetSchema)
+
+		v1.GET("/:database/:collection/webhooks", server.handleGetWebhooks)
+		v1.PUT("/:database/:collection/webhooks", server.handleSetWebhooks)
 
 		v1.GET("/:database/:collection/subscribe", server.handleSubscribe)
 		v1.POST("/:database/:collection/publish", server.handlePublish)
@@ -198,6 +208,8 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 		v1.POST("/:database/collections", server.handleCollections)
 		v1.DELETE("/:database/collections/:collection", server.handleDeleteCollection)
 
+		v1.POST("/:database/transactions", server.handleTransaction)
+
 		v1.GET("/:database/:collection", server.handleCollectionDocuments)
 		v1.POST("/:database/:collection", server.handleCollectionDocuments)
 
@@ -208,6 +220,9 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 		v1.GET("/:database/:collection/schema", server.handleGetSchema)
 		v1.PUT("/:database/:collection/schema", server.handleSetSchema)
 		v1.DELETE("/:database/:collection/schema", server.handleSetSchema)
+
+		v1.GET("/:database/:collection/webhooks", server.handleGetWebhooks)
+		v1.PUT("/:database/:collection/webhooks", server.handleSetWebhooks)
 
 		v1.GET("/:database/:collection/subscribe", server.handleSubscribe)
 		v1.POST("/:database/:collection/publish", server.handlePublish)

@@ -83,6 +83,9 @@ func (s *Store) GetSubscriberCount(database, collection string) int {
 
 // PublishEvent broadcasts an event to all active subscribers for that collection.
 func (s *Store) PublishEvent(event Event) {
+	// Asynchronously fire webhooks
+	go s.TriggerWebhooks(event)
+
 	s.subMu.RLock()
 	defer s.subMu.RUnlock()
 

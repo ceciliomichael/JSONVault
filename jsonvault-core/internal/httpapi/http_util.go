@@ -43,6 +43,8 @@ func (s *Server) handleStoreError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "invalid_json", "message": "request body must be a non-empty valid JSON value"}})
 	case errors.Is(err, store.ErrSchemaValidation):
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "schema_validation_failed", "message": err.Error()}})
+	case errors.Is(err, store.ErrPreconditionFailed):
+		c.JSON(http.StatusPreconditionFailed, gin.H{"error": gin.H{"code": "precondition_failed", "message": err.Error()}})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "internal_error", "message": "internal server error"}})
 	}

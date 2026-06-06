@@ -161,6 +161,48 @@ By default, queries using `?filter[...]` perform a full collection scan. For mas
 
 ---
 
+### Atomic Transactions
+
+JSONVault supports ACID-compliant atomic transactions, allowing you to update multiple documents at exactly the same time. If any single operation fails (e.g. invalid JSON, missing ETag), the entire transaction rolls back.
+
+- **Request:** `POST /api/v1/{database}/transactions`
+- **Body:**
+  ```json
+  {
+    "operations": [
+      { "action": "put", "collection": "users", "id": "1", "body": {"balance": 90}, "expected_etag": "hash123" },
+      { "action": "put", "collection": "users", "id": "2", "body": {"balance": 110}, "expected_etag": "hash456" },
+      { "action": "delete", "collection": "orders", "id": "xyz" }
+    ]
+  }
+  ```
+- **Response (200 OK):** An array of the resulting documents.
+
+---
+
+### Outbound Webhooks
+
+JSONVault can automatically send an HTTP POST request to your backend whenever data changes. This is extremely useful for event-driven architectures.
+*Note: JSONVault features strict SSRF protection and will block webhooks to internal or private IP addresses.*
+
+#### Register Webhooks
+- **Request:** `PUT /api/v1/{database}/{collection}/webhooks`
+- **Body:**
+  ```json
+  {
+    "webhooks": [
+      { "url": "https://api.myapp.com/webhook", "events": ["insert", "update", "delete"] }
+    ]
+  }
+  ```
+- **Response (200 OK):** Returns a `webhook_secret`. Keep this secret safe! JSONVault will use it to cryptographically sign the webhook payloads it sends you.
+
+#### Webhook Delivery
+When an event occurs, JSONVault will send a `POST` request to your URL containing the JSON payload.
+The request will include an `X-JSONVault-Signature` header. This is an HMAC SHA-256 hash of the payload using your `webhook_secret`. You MUST compute the hash on your backend and compare it to this header to ensure the webhook legitimately came from JSONVault.
+
+---
+
 ### Administrative Endpoints
 
 #### Check Server Health

@@ -36,7 +36,15 @@ type Store struct {
 type Document struct {
 	ID       string             `json:"id"`
 	Document stdjson.RawMessage `json:"document"`
-	ETag     string             `json:"-"`
+	ETag     string             `json:"etag"`
+}
+
+type TransactionOp struct {
+	Action       string             `json:"action"` // "put", "patch", "delete"
+	Collection   string             `json:"collection"`
+	ID           string             `json:"id"`
+	Body         stdjson.RawMessage `json:"body,omitempty"`
+	ExpectedETag string             `json:"expected_etag,omitempty"`
 }
 
 func computeETag(data []byte) string {
