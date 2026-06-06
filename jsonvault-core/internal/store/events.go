@@ -8,6 +8,7 @@ type Event struct {
 	Database   string             `json:"database"`
 	Collection string             `json:"collection"`
 	DocumentID string             `json:"document_id"`
+	ETag       string             `json:"etag,omitempty"`     // The new ETag
 	Document   json.RawMessage    `json:"document,omitempty"` // Included for inserts/updates
 }
 

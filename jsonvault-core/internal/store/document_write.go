@@ -69,6 +69,7 @@ func (s *Store) CreateDocument(database, collection string, body []byte) (Docume
 		Database:   database,
 		Collection: collection,
 		DocumentID: id,
+		ETag:       doc.ETag,
 		Document:   doc.Document,
 	})
 	return doc, nil
@@ -138,6 +139,7 @@ func (s *Store) PutDocument(database, collection, id string, body []byte, expect
 		Database:   database,
 		Collection: collection,
 		DocumentID: id,
+		ETag:       doc.ETag,
 		Document:   doc.Document,
 	})
 	return doc, nil
@@ -233,6 +235,7 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte, expe
 		Database:   database,
 		Collection: collection,
 		DocumentID: id,
+		ETag:       doc.ETag,
 		Document:   doc.Document,
 	})
 	return doc, nil

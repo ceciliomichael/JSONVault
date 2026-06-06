@@ -60,6 +60,14 @@ func (s *Server) handleCollectionDocuments(c *gin.Context) {
 
 		documents, total, err := s.store.ListDocuments(c.Request.Context(), database, collection, limit, offset, filter)
 		if err != nil {
+			// If the database or collection doesn't exist yet, return an empty list gracefully
+			if errors.Is(err, store.ErrNotFound) {
+				c.Header("X-Total-Count", "0")
+				c.Header("X-Limit", strconv.Itoa(limit))
+				c.Header("X-Offset", strconv.Itoa(offset))
+				c.JSON(http.StatusOK, []interface{}{})
+				return
+			}
 			s.handleStoreError(c, err)
 			return
 		}

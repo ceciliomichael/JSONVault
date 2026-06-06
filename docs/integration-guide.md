@@ -23,9 +23,9 @@ Your application should read these environment variables to construct the approp
 `${JSONVAULT_BASE_URL}/api/v1/${JSONVAULT_DATABASE_NAME}/users`
 
 ## Core Concepts
-- **Database**: Top-level isolated container (e.g., `ecommerce_db`). Databases are created automatically on first document insert.
-- **Collection**: Grouping of documents within a Database (e.g., `users`). Collections are created automatically on first document insert.
-- **Document**: JSON object containing user data, identified by an auto-generated `id`.
+- **Database**: Top-level isolated container (e.g., `ecommerce_db`). Databases are created automatically on first document insert. *(Purpose: Use this to cleanly separate completely different projects or environments, like `prod_db` vs `dev_db`).*
+- **Collection**: Grouping of documents within a Database (e.g., `users`, `orders`). Collections are created automatically on first document insert. *(Purpose: Think of these like tables in a SQL database to group similar types of data).*
+- **Document**: JSON object containing user data, identified by an auto-generated `id`. *(Purpose: This is where your actual application state lives).*
 
 ## Authentication & Headers
 All requests (except `/healthz`) MUST include the following headers:
@@ -38,6 +38,8 @@ Content-Type: application/json
 Your API Key's access level (e.g., Admin, Read/Write, Read-Only) is managed by the JSONVault server administrator. If you receive a `403 Forbidden` error, you may not have the required permissions for that operation.
 
 ## Optimistic Concurrency Control (ETags)
+*(Purpose: Prevent "silent lost updates". Use this when multiple users or tabs might be editing the exact same document at the exact same time).*
+
 To prevent silent lost updates during concurrent edits, all document reads return an `ETag` header. When performing a `PUT`, `PATCH`, or `DELETE`, you may optionally provide this value in the `If-Match` header. If the document has been modified since you read it, the server will reject your request with `412 Precondition Failed`.
 
 ---
@@ -73,6 +75,8 @@ Checks if the database server is reachable.
 ### 4. Documents
 
 #### List Documents
+*(Purpose: Retrieve a page of documents, or search for specific items using exact-match filters).*
+*(Note: If the database or collection has not been created yet, this endpoint gracefully returns an empty array `[]` instead of a 404 error).*
 - **Request:** `GET /api/v1/{database}/{collection}`
   - **Query Parameters:**
     - `limit` (int, default: 100, max: 1000): Number of documents to return.
@@ -107,6 +111,7 @@ Checks if the database server is reachable.
   ```
 
 #### Update Document (Replace)
+*(Purpose: Completely overwrite an existing document. Useful when you have the full state and want to replace it entirely).*
 - **Request:** `PUT /api/v1/{database}/{collection}/{id}`
 - **Headers (Optional):** `If-Match: <etag>`
 - **Body:** Any valid JSON object. *(This operation completely overwrites the existing document).*
@@ -119,6 +124,7 @@ Checks if the database server is reachable.
   ```
 
 #### Partial Update Document (Merge)
+*(Purpose: Update specific fields inside a document without modifying the rest. Useful for changing a single field like `status: "completed"` without needing to fetch the entire document first).*
 - **Request:** `PATCH /api/v1/{database}/{collection}/{id}`
 - **Headers (Optional):** `If-Match: <etag>`
 - **Body:** Any valid JSON object containing fields to merge. *(Updates specific fields while preserving the rest).*
@@ -144,17 +150,20 @@ Checks if the database server is reachable.
 
 ### 5. Real-Time Subscriptions
 
+*(Purpose: Build live chat apps, collaborative editors, or real-time dashboards without hammering the server with continuous polling).*
+
 JSONVault natively supports real-time document streaming via Server-Sent Events (SSE). You can subscribe to a collection to receive instant pushes whenever a document is inserted, updated, or deleted.
 
 #### Subscribe to Collection
+*(Note: You can subscribe to a collection before it even exists. The server will keep the connection open and wait gracefully).*
 - **Request:** `GET /api/v1/{database}/{collection}/subscribe`
 - **Headers:** `Authorization: Bearer <your-api-key>`
 - **Response:** An infinite HTTP stream of `text/event-stream`.
 - **Event Format:**
   ```text
-  data: {"action":"insert","database":"{database}","collection":"{collection}","document_id":"<id>","document":{...}}
+  data: {"action":"insert","database":"{database}","collection":"{collection}","document_id":"<id>","etag":"<new_etag>","document":{...}}
   
-  data: {"action":"update","database":"{database}","collection":"{collection}","document_id":"<id>","document":{...}}
+  data: {"action":"update","database":"{database}","collection":"{collection}","document_id":"<id>","etag":"<new_etag>","document":{...}}
   
   data: {"action":"delete","database":"{database}","collection":"{collection}","document_id":"<id>"}
   ```
