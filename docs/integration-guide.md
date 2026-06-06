@@ -1,195 +1,135 @@
 # JSONVault Client Integration Guide
 
-JSONVault is a high-performance NoSQL document database accessed via a REST API. Data is organized into a strict 3-tier hierarchy: **Database -> Collection -> Document**.
+Welcome to JSONVault! This guide is written for frontend and backend developers who need to connect their applications to a JSONVault database. 
 
-This guide is designed for developers integrating their applications with a JSONVault instance. It covers the required configurations, concepts, and the complete API reference.
+JSONVault is a NoSQL document database built for speed and developer experience. It operates over a simple REST API and features built-in Real-Time Subscriptions.
 
-## Configuration & Setup
+Data is organized into a strict hierarchy: **Database -> Collection -> Document**.
 
-When connecting to JSONVault from your client application, store your credentials and connection strings in your project's `.env` file to prevent hardcoding secrets in your source code.
+---
 
-```env
-# The URL where the JSONVault instance is hosted
-JSONVAULT_BASE_URL=http://localhost:5766
+## 💡 1. Core Principles (The "Quirks")
 
-# Your API Key for authorization
-JSONVAULT_API_KEY=your-secret-api-key
+Before diving into the API, you must understand these three core features of JSONVault. Knowing these will save you hours of debugging!
 
-# The name of your database project
-JSONVAULT_DATABASE_NAME=my_app_db
-```
+### 🧩 1. Lazy Auto-Creation
+You **never** need to explicitly create a database or a collection. 
+When you insert your first document into `my_app_db/users`, JSONVault automatically provisions the database and collection in milliseconds.
+* **The Quirk:** Because of this, if you query a collection that hasn't been created yet (e.g. `GET /users` on a fresh install), JSONVault will gracefully return an empty array `[]`. It will **not** throw a 404 error, keeping your frontend code incredibly simple!
 
-Your application should read these environment variables to construct the appropriate REST API requests. For example, a request to list users would map to:
-`${JSONVAULT_BASE_URL}/api/v1/${JSONVAULT_DATABASE_NAME}/users`
+### 🔄 2. Built for Real-Time (SSE)
+Instead of hammering the server with continuous polling, JSONVault has an internal event bus. You can open a Server-Sent Events (SSE) connection to any collection, and the database will instantly stream all inserts, updates, and deletes directly to your app.
+* **The Quirk:** You can subscribe to a collection *before it even exists*. The server will hold the connection open gracefully until the first document is inserted. 
 
-## Core Concepts
-- **Database**: Top-level isolated container (e.g., `ecommerce_db`). Databases are created automatically on first document insert. *(Purpose: Use this to cleanly separate completely different projects or environments, like `prod_db` vs `dev_db`).*
-- **Collection**: Grouping of documents within a Database (e.g., `users`, `orders`). Collections are created automatically on first document insert. *(Purpose: Think of these like tables in a SQL database to group similar types of data).*
-- **Document**: JSON object containing user data, identified by an auto-generated `id`. *(Purpose: This is where your actual application state lives).*
+### 🛡️ 3. Optimistic Concurrency (ETags)
+To prevent two users from accidentally overwriting each other's edits, JSONVault uses cryptographic **ETags**. 
+When you read a document, you get an `ETag`. When you update that document, you send the `ETag` back in the `If-Match` HTTP header. If someone else changed the document in the meantime, your update is safely rejected with a `412 Precondition Failed`.
+* **The Quirk:** JSONVault is incredibly forgiving. Even if your proxy (like Cloudflare or Next.js) aggressively mutates your ETag by adding `W/` or stripping quotes, JSONVault will automatically extract the underlying cryptographic hash and match it perfectly.
 
-## Authentication & Headers
-All requests (except `/healthz`) MUST include the following headers:
+---
+
+## 🔐 2. Authentication & Headers
+
+Store your credentials in your application's environment variables (e.g., `.env`).
+To access the database, every HTTP request (except `/healthz`) MUST include the following headers:
+
 ```http
 Authorization: Bearer <your-api-key>
 Content-Type: application/json
 ```
-*(Note: `Content-Type` is strictly required for `POST`, `PUT`, and `PATCH` requests).*
+*(Note: `Content-Type` is strictly required for POST, PUT, and PATCH requests).*
 
-Your API Key's access level (e.g., Admin, Read/Write, Read-Only) is managed by the JSONVault server administrator. If you receive a `403 Forbidden` error, you may not have the required permissions for that operation.
-
-## Optimistic Concurrency Control (ETags)
-*(Purpose: Prevent "silent lost updates". Use this when multiple users or tabs might be editing the exact same document at the exact same time).*
-
-To prevent silent lost updates during concurrent edits, all document reads return an `ETag` header. When performing a `PUT`, `PATCH`, or `DELETE`, you may optionally provide this value in the `If-Match` header. If the document has been modified since you read it, the server will reject your request with `412 Precondition Failed`.
+If you receive a `403 Forbidden` error, your API Key's Role-Based Access Control (RBAC) does not have the required permissions for that specific operation.
 
 ---
 
-## API Reference
+## 📡 3. The API Reference
 
-### 1. Health
-Checks if the database server is reachable.
-- **Request:** `GET /healthz`
-- **Response (200 OK):** `{"status": "ok"}`
+### Real-Time Subscriptions
 
-### 2. Databases
+#### Stream Collection Updates
+Open a persistent HTTP connection to receive live document mutations.
+- **Request:** `GET /api/v1/{database}/{collection}/subscribe`
+- **Response:** Infinite stream of `text/event-stream`
+- **Event Format:**
+  ```text
+  data: {"action":"insert","database":"{db}","collection":"{coll}","document_id":"<id>","etag":"<new_etag>","document":{...}}
+  
+  data: {"action":"update","database":"{db}","collection":"{coll}","document_id":"<id>","etag":"<new_etag>","document":{...}}
+  
+  data: {"action":"delete","database":"{db}","collection":"{coll}","document_id":"<id>"}
+  ```
+*(Note: To prevent proxies from dropping idle connections, JSONVault sends a silent `: keepalive` comment every 15 seconds. Standard EventSource clients handle this automatically).*
 
-#### List Databases
-- **Request:** `GET /api/v1/databases`
-- **Response (200 OK):** `["ecommerce_db", "blog_db"]`
+---
 
-#### Delete Database
-*(Requires Admin permissions)*
-- **Request:** `DELETE /api/v1/{database}`
-- **Response (200 OK):** `{"deleted": true, "name": "{database}"}`
-
-### 3. Collections
-
-#### List Collections
-- **Request:** `GET /api/v1/{database}/collections`
-- **Response (200 OK):** `["users", "products"]`
-
-#### Delete Collection
-- **Request:** `DELETE /api/v1/{database}/collections/{collection}`
-- **Response (200 OK):** `{"deleted": true, "name": "{collection}"}`
-
-### 4. Documents
+### Documents (CRUD)
 
 #### List Documents
-*(Purpose: Retrieve a page of documents, or search for specific items using exact-match filters).*
-*(Note: If the database or collection has not been created yet, this endpoint gracefully returns an empty array `[]` instead of a 404 error).*
+Retrieve a paginated list of documents, optionally filtered by exact-match fields.
 - **Request:** `GET /api/v1/{database}/{collection}`
   - **Query Parameters:**
-    - `limit` (int, default: 100, max: 1000): Number of documents to return.
-    - `offset` (int, default: 0, max: 10000): Number of documents to skip.
-    - `filter[<field>]` (string): Filter documents by exact match (e.g., `?filter[active]=true`, `?filter[age]=30`). Max 5 filters per query.
-- **Response (200 OK):** Pagination metadata is returned in response headers (`X-Total-Count`, `X-Limit`, `X-Offset`).
-  ```json
-  [
-    { "id": "12345", "document": { "key": "value" } }
-  ]
-  ```
+    - `limit` (max: 1000, default: 100)
+    - `offset` (max: 10000, default: 0)
+    - `filter[<field>]` (e.g., `?filter[status]=active&filter[age]=30`)
+- **Response (200 OK):** An array of documents. (Pagination metadata is returned in `X-Total-Count`, `X-Limit`, `X-Offset` headers).
 
 #### Create Document
 - **Request:** `POST /api/v1/{database}/{collection}`
 - **Body:** Any valid JSON object.
-- **Response (201 Created):**
-  ```json
-  {
-    "id": "<auto-generated-id>",
-    "document": { ...your data... }
-  }
-  ```
+- **Response (201 Created):** Returns the auto-generated `id` and the generated `ETag` header.
 
 #### Get Document by ID
 - **Request:** `GET /api/v1/{database}/{collection}/{id}`
-- **Response (200 OK):**
-  ```json
-  {
-    "id": "<id>",
-    "document": { ...your data... }
-  }
-  ```
+- **Response (200 OK):** Returns the document and its `ETag` header.
 
 #### Update Document (Replace)
-*(Purpose: Completely overwrite an existing document. Useful when you have the full state and want to replace it entirely).*
+Completely overwrites the document.
 - **Request:** `PUT /api/v1/{database}/{collection}/{id}`
-- **Headers (Optional):** `If-Match: <etag>`
-- **Body:** Any valid JSON object. *(This operation completely overwrites the existing document).*
-- **Response (200 OK):**
-  ```json
-  {
-    "id": "<id>",
-    "document": { ...new data... }
-  }
-  ```
+- **Headers:** `If-Match: <your-etag>` (Optional, but highly recommended)
+- **Body:** The full new JSON object.
 
 #### Partial Update Document (Merge)
-*(Purpose: Update specific fields inside a document without modifying the rest. Useful for changing a single field like `status: "completed"` without needing to fetch the entire document first).*
+Updates specific fields while preserving the rest (e.g. only updating `status: "completed"`).
 - **Request:** `PATCH /api/v1/{database}/{collection}/{id}`
-- **Headers (Optional):** `If-Match: <etag>`
-- **Body:** Any valid JSON object containing fields to merge. *(Updates specific fields while preserving the rest).*
-- **Response (200 OK):**
-  ```json
-  {
-    "id": "<id>",
-    "document": { ...merged data... }
-  }
-  ```
+- **Headers:** `If-Match: <your-etag>` (Optional, but highly recommended)
+- **Body:** A JSON object containing only the fields to modify.
 
 #### Delete Document
 - **Request:** `DELETE /api/v1/{database}/{collection}/{id}`
-- **Headers (Optional):** `If-Match: <etag>`
-- **Response (200 OK):**
-  ```json
-  {
-    "collection": "{collection}",
-    "deleted": true,
-    "id": "{id}"
-  }
-  ```
-
-### 5. Real-Time Subscriptions
-
-*(Purpose: Build live chat apps, collaborative editors, or real-time dashboards without hammering the server with continuous polling).*
-
-JSONVault natively supports real-time document streaming via Server-Sent Events (SSE). You can subscribe to a collection to receive instant pushes whenever a document is inserted, updated, or deleted.
-
-#### Subscribe to Collection
-*(Note: You can subscribe to a collection before it even exists. The server will keep the connection open and wait gracefully).*
-- **Request:** `GET /api/v1/{database}/{collection}/subscribe`
-- **Headers:** `Authorization: Bearer <your-api-key>`
-- **Response:** An infinite HTTP stream of `text/event-stream`.
-- **Event Format:**
-  ```text
-  data: {"action":"insert","database":"{database}","collection":"{collection}","document_id":"<id>","etag":"<new_etag>","document":{...}}
-  
-  data: {"action":"update","database":"{database}","collection":"{collection}","document_id":"<id>","etag":"<new_etag>","document":{...}}
-  
-  data: {"action":"delete","database":"{database}","collection":"{collection}","document_id":"<id>"}
-  ```
-
-*(Note: The server will automatically send a silent `: keepalive` comment every 15 seconds to prevent load balancers like Cloudflare or Nginx from dropping the connection. Your browser's `EventSource` will automatically ignore these comments.)*
+- **Headers:** `If-Match: <your-etag>` (Optional)
 
 ---
 
-## Errors
-Standard JSON error response format across all endpoints:
+### Administrative Endpoints
+
+#### Check Server Health
+- **Request:** `GET /healthz`
+
+#### List / Delete Databases
+- **List:** `GET /api/v1/databases`
+- **Delete:** `DELETE /api/v1/{database}` *(Requires Admin API Key)*
+
+#### List / Delete Collections
+- **List:** `GET /api/v1/{database}/collections`
+- **Delete:** `DELETE /api/v1/{database}/collections/{collection}`
+
+---
+
+## 🚨 4. Error Handling
+All errors follow a standard, predictable JSON format:
 ```json
 {
   "error": {
-    "code": "<string_error_code>",
-    "message": "<human_readable_message>"
+    "code": "precondition_failed",
+    "message": "ETag mismatch"
   }
 }
 ```
 
-**Common HTTP Status Codes:**
-- `400 Bad Request`: Invalid JSON payload, missing filters, or offset too large.
+**Common Status Codes you might encounter:**
+- `400 Bad Request`: Invalid JSON, too many filters, or offset too large.
 - `401 Unauthorized`: Missing or invalid Bearer token.
-- `403 Forbidden`: API Key does not have the required permissions for this action.
-- `404 Not Found`: Target resource does not exist.
-- `405 Method Not Allowed`: HTTP verb not supported on this endpoint.
-- `412 Precondition Failed`: ETag provided in `If-Match` does not match current document.
+- `403 Forbidden`: API Key lacks required permissions.
+- `412 Precondition Failed`: The ETag you provided does not match the server's current version (Someone else edited it!).
 - `413 Payload Too Large`: Request body exceeds the 10MB limit.
-- `415 Unsupported Media Type`: Payload without `application/json`.
-- `500 Internal Server Error`: Unexpected server issue.

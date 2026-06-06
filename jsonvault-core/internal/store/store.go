@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +41,21 @@ type Document struct {
 func computeETag(data []byte) string {
 	hash := sha256.Sum256(data)
 	return fmt.Sprintf(`"%x"`, hash)
+}
+
+var etagRegex = regexp.MustCompile(`(?i)[a-f0-9]{64}`)
+
+// matchETags safely compares two ETags by extracting the underlying 64-character SHA-256 hash.
+// This guarantees that any proxy mutations (like Cloudflare's W/, or missing quotes) are completely ignored.
+func matchETags(computed, expected string) bool {
+	computedHash := strings.ToLower(etagRegex.FindString(computed))
+	expectedHash := strings.ToLower(etagRegex.FindString(expected))
+	
+	if computedHash == "" || expectedHash == "" {
+		return false // Reject if there isn't a valid 64-character hash
+	}
+	
+	return computedHash == expectedHash
 }
 
 func New(root string, cacheEntries int, encryptionKey []byte) (*Store, error) {

@@ -114,7 +114,7 @@ func (s *Store) PutDocument(database, collection, id string, body []byte, expect
 			return fmt.Errorf("corrupt document (decrypt): %w", err)
 		}
 
-		if expectedETag != "" && computeETag(existingPlaintext) != expectedETag {
+		if expectedETag != "" && !matchETags(computeETag(existingPlaintext), expectedETag) {
 			return ErrPreconditionFailed
 		}
 		if err := unindexDocumentTx(tx, collection, id, existingPlaintext); err != nil {
@@ -180,7 +180,7 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte, expe
 			return fmt.Errorf("corrupt document (decrypt): %w", err)
 		}
 
-		if expectedETag != "" && computeETag(existingPlaintext) != expectedETag {
+		if expectedETag != "" && !matchETags(computeETag(existingPlaintext), expectedETag) {
 			return ErrPreconditionFailed
 		}
 
@@ -272,7 +272,7 @@ func (s *Store) DeleteDocument(database, collection, id string, expectedETag str
 			return fmt.Errorf("corrupt document (decrypt): %w", err)
 		}
 
-		if expectedETag != "" && computeETag(existingPlaintext) != expectedETag {
+		if expectedETag != "" && !matchETags(computeETag(existingPlaintext), expectedETag) {
 			return ErrPreconditionFailed
 		}
 		if err := incrementCollectionCountTx(tx, collection, -1, b); err != nil {
