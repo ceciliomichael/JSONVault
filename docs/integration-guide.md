@@ -28,18 +28,22 @@ When you read a document, you get an `ETag`. When you update that document, you 
 
 ---
 
-## 🔐 2. Authentication & Headers
+## 🔐 2. Authentication & API Keys
 
-Store your credentials in your application's environment variables (e.g., `.env`).
-To access the database, every HTTP request (except `/healthz`) MUST include the following headers:
+JSONVault uses **Stateless JSON Web Tokens (JWT)** for scoped access. 
+
+You should receive an API Key (JWT) from your Dashboard Provider.
+
+### Accessing the Database
+Every HTTP request (except `/healthz`) MUST include the generated token in the header:
 
 ```http
-Authorization: Bearer <your-api-key>
+Authorization: Bearer <your-generated-jwt-token>
 Content-Type: application/json
 ```
 *(Note: `Content-Type` is strictly required for POST, PUT, and PATCH requests).*
 
-If you receive a `403 Forbidden` error, your API Key's Role-Based Access Control (RBAC) does not have the required permissions for that specific operation.
+If you receive a `403 Forbidden` error or a `401 Unauthorized` error, your JWT Token does not have the required permissions for that specific database/collection.
 
 ---
 
