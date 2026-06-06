@@ -26,12 +26,15 @@ type Store interface {
 	SetSchema(database, collection string, schema []byte) error
 	GetSchema(database, collection string) ([]byte, error)
 
+	SetFTSConfig(database, collection string, fields []string) error
+	SearchFTS(database, collection, query string) ([]string, error)
+
 	SetWebhooks(database, collection string, webhooks []store.WebhookConfig) (string, error)
 	GetWebhooks(database, collection string) (*store.WebhookRecord, error)
 
 	CreateDocument(database, collection string, body []byte) (store.Document, error)
 	CreateDocumentWithTTL(database, collection string, body []byte, expireIn time.Duration) (store.Document, error)
-	ListDocuments(ctx context.Context, database, collection string, limit, offset int, filter map[string]interface{}, sortField string) ([]store.Document, int, error)
+	ListDocuments(ctx context.Context, database, collection string, limit, offset int, filter map[string]interface{}, sortField string, searchQuery string) ([]store.Document, int, error)
 	GetDocument(database, collection, id string) (store.Document, error)
 	PutDocument(database, collection, id string, body []byte, expectedETag string) (store.Document, error)
 	PutDocumentWithTTL(database, collection, id string, body []byte, expectedETag string, expireIn time.Duration) (store.Document, error)
@@ -144,6 +147,8 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 		v1.POST("/:database/:collection/indexes", server.handleCreateIndex)
 		v1.DELETE("/:database/:collection/indexes/:field", server.handleDeleteIndex)
 
+		v1.POST("/:database/:collection/fts", server.handleSetFTSConfig)
+
 		v1.GET("/:database/:collection/schema", server.handleGetSchema)
 		v1.PUT("/:database/:collection/schema", server.handleSetSchema)
 		v1.DELETE("/:database/:collection/schema", server.handleSetSchema)
@@ -216,6 +221,8 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 		v1.GET("/:database/:collection/indexes", server.handleListIndexes)
 		v1.POST("/:database/:collection/indexes", server.handleCreateIndex)
 		v1.DELETE("/:database/:collection/indexes/:field", server.handleDeleteIndex)
+
+		v1.POST("/:database/:collection/fts", server.handleSetFTSConfig)
 
 		v1.GET("/:database/:collection/schema", server.handleGetSchema)
 		v1.PUT("/:database/:collection/schema", server.handleSetSchema)

@@ -161,6 +161,38 @@ By default, queries using `?filter[...]` perform a full collection scan. For mas
 
 ---
 
+### Full-Text Search (FTS)
+
+JSONVault includes a native high-performance inverted index engine allowing you to search for specific words or phrases inside your documents.
+
+#### 1. Configure Indexed Fields
+
+First, define which fields in your collection should be indexed for Full-Text Search.
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/store/users/fts" \
+  -H "Authorization: Bearer <your_jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"fields": ["name", "bio"]}'
+```
+
+#### 2. Querying
+
+You can use the `search` query parameter to instantly intersect tokens and find matching documents. 
+For multiple words, standard URL encoding applies (e.g. `fast+car`).
+
+```bash
+# Find any users where "john" is mentioned in their name or bio
+curl "http://localhost:8080/api/v1/store/users?search=john" \
+  -H "Authorization: Bearer <your_jwt_token>"
+
+# Combine Full-Text Search with B-Tree filters
+curl "http://localhost:8080/api/v1/store/users?search=engineer&filter[status]=%22active%22" \
+  -H "Authorization: Bearer <your_jwt_token>"
+```
+
+---
+
 ### Atomic Transactions
 
 JSONVault supports ACID-compliant atomic transactions, allowing you to update multiple documents at exactly the same time. If any single operation fails (e.g. invalid JSON, missing ETag), the entire transaction rolls back.

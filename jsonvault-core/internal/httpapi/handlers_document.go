@@ -60,7 +60,9 @@ func (s *Server) handleCollectionDocuments(c *gin.Context) {
 		}
 
 		sortField := query.Get("sort")
-		documents, total, err := s.store.ListDocuments(c.Request.Context(), database, collection, limit, offset, filter, sortField)
+		searchQuery := query.Get("search")
+
+		documents, total, err := s.store.ListDocuments(c.Request.Context(), database, collection, limit, offset, filter, sortField, searchQuery)
 		if err != nil {
 			// If the database or collection doesn't exist yet, return an empty list gracefully
 			if errors.Is(err, store.ErrNotFound) {

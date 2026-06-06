@@ -47,3 +47,14 @@ Provide this `"token"` string to the user so they can connect their frontend app
 Because JSONVault uses **Stateless JWTs**, the tokens are not saved anywhere on the JSONVault server disk. They only exist mathematically. 
 
 If your `JSONVAULT_JWT_SECRET` is ever compromised, or if you want to globally invalidate all active API keys ever issued, you simply change `JSONVAULT_JWT_SECRET` in your `.env` file and restart the server. **All old keys will instantly stop working.**
+
+## Server Security & Webhook SSRF
+
+JSONVault features strict **Server-Side Request Forgery (SSRF) Protection** on Outbound Webhooks out of the box. Users cannot configure webhooks that target `localhost`, `127.0.0.1`, or any internal/private network addresses.
+
+If you are running automated tests or specifically need to allow users to trigger webhooks against local development servers, you can disable this protection by setting an environment variable before starting the JSONVault server:
+
+```bash
+JSONVAULT_ALLOW_LOCAL_WEBHOOKS=true
+```
+*(Warning: Never enable this in production!)*

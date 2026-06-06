@@ -34,7 +34,7 @@ func TestStoreIndexes(t *testing.T) {
 	}
 
 	// Test Indexed Query
-	docs, _, err := db.ListDocuments(context.Background(), "testdb", "users", 10, 0, map[string]interface{}{"email": "alice@example.com"}, "")
+	docs, _, err := db.ListDocuments(context.Background(), "testdb", "users", 10, 0, map[string]interface{}{"email": "alice@example.com"}, "", "")
 	if err != nil {
 		t.Fatalf("ListDocuments: %v", err)
 	}
@@ -49,13 +49,13 @@ func TestStoreIndexes(t *testing.T) {
 	}
 
 	// Old email should return 0 docs
-	docs, _, _ = db.ListDocuments(context.Background(), "testdb", "users", 10, 0, map[string]interface{}{"email": "alice@example.com"}, "")
+	docs, _, _ = db.ListDocuments(context.Background(), "testdb", "users", 10, 0, map[string]interface{}{"email": "alice@example.com"}, "", "")
 	if len(docs) != 0 {
 		t.Fatalf("expected 0 docs after update, got %v", docs)
 	}
 
 	// New email should return doc
-	docs, _, _ = db.ListDocuments(context.Background(), "testdb", "users", 10, 0, map[string]interface{}{"email": "alice2@example.com"}, "")
+	docs, _, _ = db.ListDocuments(context.Background(), "testdb", "users", 10, 0, map[string]interface{}{"email": "alice2@example.com"}, "", "")
 	if len(docs) != 1 || docs[0].ID != doc1.ID {
 		t.Fatalf("expected doc1 under new email, got %v", docs)
 	}
@@ -65,7 +65,7 @@ func TestStoreIndexes(t *testing.T) {
 		t.Fatalf("DeleteDocument: %v", err)
 	}
 
-	docs, _, _ = db.ListDocuments(context.Background(), "testdb", "users", 10, 0, map[string]interface{}{"email": "bob@example.com"}, "")
+	docs, _, _ = db.ListDocuments(context.Background(), "testdb", "users", 10, 0, map[string]interface{}{"email": "bob@example.com"}, "", "")
 	if len(docs) != 0 {
 		t.Fatalf("expected 0 docs after delete, got %v", docs)
 	}

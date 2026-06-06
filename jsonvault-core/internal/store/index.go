@@ -273,16 +273,22 @@ func getIndexedFieldsTx(tx *bolt.Tx, collection string) []string {
 	return indexes
 }
 
-// indexDocumentTx adds a document to all relevant indexes
+// indexDocumentTx adds a document to all relevant indexes (B-Tree and FTS)
 func indexDocumentTx(tx *bolt.Tx, collection, docID string, doc []byte) error {
-	indexes := getIndexedFieldsTx(tx, collection)
-	if len(indexes) == 0 {
-		return nil
-	}
-
 	var parsed map[string]interface{}
 	if err := sonic.Unmarshal(doc, &parsed); err != nil {
 		return err
+	}
+
+	// 1. Hook into Full-Text Search
+	if err := indexFTS(tx, collection, docID, parsed); err != nil {
+		return fmt.Errorf("fts index: %w", err)
+	}
+
+	// 2. Hook into B-Tree Secondary Indexes
+	indexes := getIndexedFieldsTx(tx, collection)
+	if len(indexes) == 0 {
+		return nil
 	}
 
 	for _, field := range indexes {
@@ -311,14 +317,20 @@ func indexDocumentTx(tx *bolt.Tx, collection, docID string, doc []byte) error {
 
 // unindexDocumentTx removes a document from all relevant indexes based on its OLD payload
 func unindexDocumentTx(tx *bolt.Tx, collection, docID string, oldDoc []byte) error {
-	indexes := getIndexedFieldsTx(tx, collection)
-	if len(indexes) == 0 {
-		return nil
-	}
-
 	var parsed map[string]interface{}
 	if err := sonic.Unmarshal(oldDoc, &parsed); err != nil {
 		return err // Or return nil to tolerate corrupt deletes
+	}
+
+	// 1. Hook into Full-Text Search
+	if err := unindexFTS(tx, collection, docID); err != nil {
+		return fmt.Errorf("fts unindex: %w", err)
+	}
+
+	// 2. Hook into B-Tree Secondary Indexes
+	indexes := getIndexedFieldsTx(tx, collection)
+	if len(indexes) == 0 {
+		return nil
 	}
 
 	for _, field := range indexes {

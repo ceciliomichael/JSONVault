@@ -15,7 +15,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-func (s *Store) ListDocuments(ctx context.Context, database, collection string, limit, offset int, filter map[string]interface{}, sortField string) ([]Document, int, error) {
+func (s *Store) ListDocuments(ctx context.Context, database, collection string, limit, offset int, filter map[string]interface{}, sortField string, searchQuery string) ([]Document, int, error) {
 	ctx = contextOrBackground(ctx)
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
@@ -59,8 +59,15 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 
 		total = getCollectionCountTx(tx, collection, b)
 
+		var searchIDs []string
+		useSearch := false
+		if searchQuery != "" {
+			useSearch = true
+			searchIDs = searchFTS(tx, collection, searchQuery)
+		}
+
 		var indexedField, indexedValue string
-		if len(filter) > 0 {
+		if len(filter) > 0 && !useSearch {
 			indexes := getIndexedFieldsTx(tx, collection)
 			for _, idx := range indexes {
 				if val, ok := filter[idx]; ok {
@@ -71,7 +78,52 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 			}
 		}
 
-		if indexedField != "" {
+		if useSearch {
+			// Super fast path: Full-Text Search intersection
+			matched = len(searchIDs) // Approximation before filters
+			var seen int
+			for _, k := range searchIDs {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				v := b.Get([]byte(k))
+				if v == nil {
+					continue
+				}
+				plaintext, err := decryptDocument(v, s.encryptionKey)
+				if err != nil {
+					return fmt.Errorf("corrupt document (decrypt): %w", err)
+				}
+
+				matches := true
+				if len(filter) > 0 {
+					var parsed map[string]interface{}
+					if err := sonic.Unmarshal(plaintext, &parsed); err == nil {
+						for fk, fv := range filter {
+							val, exists := parsed[fk]
+							if !exists || encodeIndexValue(val) != encodeIndexValue(fv) {
+								matches = false
+								break
+							}
+						}
+					} else {
+						matches = false
+					}
+				}
+
+				if matches {
+					if sortField != "" || (seen >= offset && len(documents) < limit) {
+						documents = append(documents, Document{
+							ID:       k,
+							Document: stdjson.RawMessage(plaintext),
+							ETag:     computeETag(plaintext),
+						})
+					}
+					seen++
+				}
+			}
+			matched = seen
+		} else if indexedField != "" {
 			// Fast path: use secondary index
 			idxBucketName := getIndexBucketName(collection, indexedField)
 			idxBucket := tx.Bucket(idxBucketName)
