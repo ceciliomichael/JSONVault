@@ -11,12 +11,14 @@ import (
 	"time"
 )
 
-var ErrMissingAPIKey = errors.New("missing JSONVAULT_API_KEY or JSONVAULT_API_KEYS")
+var ErrMissingAdminKey = errors.New("missing JSONVAULT_ADMIN_KEY")
+var ErrMissingJWTSecret = errors.New("missing JSONVAULT_JWT_SECRET")
 
 type Config struct {
 	Addr              string
 	DataDir           string
-	APIKeys           []string
+	AdminKey          string
+	JWTSecret         []byte
 	CacheEntries      int
 	MaxBodyBytes      int64
 	ReadHeaderTimeout time.Duration
@@ -36,10 +38,16 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	keys := apiKeysFromEnv()
-	if len(keys) == 0 {
-		return Config{}, ErrMissingAPIKey
+	adminKey := envString("JSONVAULT_ADMIN_KEY", "")
+	if adminKey == "" {
+		return Config{}, ErrMissingAdminKey
 	}
+
+	jwtSecretStr := envString("JSONVAULT_JWT_SECRET", "")
+	if jwtSecretStr == "" {
+		return Config{}, ErrMissingJWTSecret
+	}
+	jwtSecret := []byte(jwtSecretStr)
 
 	cacheEntries, err := envInt("JSONVAULT_CACHE_ENTRIES", 1024)
 	if err != nil {
@@ -94,7 +102,8 @@ func Load() (Config, error) {
 	return Config{
 		Addr:              envString("JSONVAULT_ADDR", ":8080"),
 		DataDir:           envString("JSONVAULT_DATA_DIR", "./data"),
-		APIKeys:           keys,
+		AdminKey:          adminKey,
+		JWTSecret:         jwtSecret,
 		CacheEntries:      cacheEntries,
 		MaxBodyBytes:      maxBodyBytes,
 		ReadHeaderTimeout: readHeaderTimeout,
@@ -177,26 +186,6 @@ func parseEnvLine(line string) (string, string, bool, error) {
 	return key, value, true, nil
 }
 
-func apiKeysFromEnv() []string {
-	seen := make(map[string]struct{})
-	var keys []string
-	add := func(value string) {
-		for _, key := range strings.Split(value, ",") {
-			key = strings.TrimSpace(key)
-			if key == "" {
-				continue
-			}
-			if _, exists := seen[key]; exists {
-				continue
-			}
-			seen[key] = struct{}{}
-			keys = append(keys, key)
-		}
-	}
-	add(os.Getenv("JSONVAULT_API_KEY"))
-	add(os.Getenv("JSONVAULT_API_KEYS"))
-	return keys
-}
 
 func envString(name, fallback string) string {
 	value := strings.TrimSpace(os.Getenv(name))

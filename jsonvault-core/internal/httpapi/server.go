@@ -48,8 +48,9 @@ type Options struct {
 }
 
 type Server struct {
-	store        Store
-	maxBodyBytes int64
+	store         Store
+	authenticator *auth.Authenticator
+	maxBodyBytes  int64
 }
 
 func NewHandler(db Store, authenticator *auth.Authenticator, options Options) http.Handler {
@@ -59,8 +60,9 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 	}
 
 	server := &Server{
-		store:        db,
-		maxBodyBytes: maxBodyBytes,
+		store:         db,
+		authenticator: authenticator,
+		maxBodyBytes:  maxBodyBytes,
 	}
 
 	gin.SetMode(gin.ReleaseMode)
@@ -78,7 +80,7 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 			c.Next()
 			return
 		}
-		ok, scope := authenticator.Authenticate(c.GetHeader("Authorization"))
+		ok, scope, jwtDb, jwtColl := authenticator.Authenticate(c.GetHeader("Authorization"))
 		if !ok {
 			c.Header("WWW-Authenticate", `Bearer realm="jsonvault"`)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, map[string]any{
@@ -90,6 +92,8 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 			return
 		}
 		c.Set("scope", scope)
+		c.Set("jwt_db", jwtDb)
+		c.Set("jwt_coll", jwtColl)
 		c.Next()
 	})
 
@@ -107,6 +111,11 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 
 	v1 := r.Group("/api/v1")
 	{
+		v1.GET("/admin/keys", func(c *gin.Context) {
+			c.AbortWithStatusJSON(http.StatusMethodNotAllowed, gin.H{"error": "use POST to generate keys"})
+		})
+		v1.POST("/admin/keys", server.handleCreateKey)
+
 		v1.GET("/admin/backup/:database", server.handleBackupDatabase)
 
 		v1.GET("/databases", server.handleDatabases)
@@ -144,8 +153,9 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 	}
 
 	server := &Server{
-		store:        db,
-		maxBodyBytes: maxBodyBytes,
+		store:         db,
+		authenticator: nil,
+		maxBodyBytes:  maxBodyBytes,
 	}
 
 	gin.SetMode(gin.ReleaseMode)
@@ -154,8 +164,10 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 	r.Use(maxBodyBytesMiddleware(maxBodyBytes))
 
 	r.Use(func(c *gin.Context) {
-		// Mock admin scope for tests
+		// Mock admin scope for tests if no auth
 		c.Set("scope", auth.ScopeAdmin)
+		c.Set("jwt_db", "*")
+		c.Set("jwt_coll", "*")
 		c.Next()
 	})
 
@@ -165,6 +177,11 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 
 	v1 := r.Group("/api/v1")
 	{
+		v1.GET("/admin/keys", func(c *gin.Context) {
+			c.AbortWithStatusJSON(http.StatusMethodNotAllowed, gin.H{"error": "use POST to generate keys"})
+		})
+		v1.POST("/admin/keys", server.handleCreateKey)
+
 		v1.GET("/databases", server.handleDatabases)
 		v1.POST("/databases", server.handleDatabases)
 		v1.DELETE("/:database", server.handleDeleteDatabase)
@@ -212,16 +229,45 @@ func (s *Server) hasScope(c *gin.Context, required auth.Scope) bool {
 		return false
 	}
 
-	switch scope {
-	case auth.ScopeAdmin:
+	// Admin has full access to everything
+	if scope == auth.ScopeAdmin {
 		return true
-	case auth.ScopeReadWrite:
-		return required == auth.ScopeReadWrite || required == auth.ScopeReadOnly
-	case auth.ScopeReadOnly:
-		return required == auth.ScopeReadOnly
-	default:
+	}
+
+	// Verify scope level
+	hasRightScope := false
+	if scope == auth.ScopeReadWrite && (required == auth.ScopeReadWrite || required == auth.ScopeReadOnly) {
+		hasRightScope = true
+	} else if scope == auth.ScopeReadOnly && required == auth.ScopeReadOnly {
+		hasRightScope = true
+	}
+
+	if !hasRightScope {
 		return false
 	}
+
+	// Verify database and collection constraints if applicable
+	jwtDb, _ := c.Get("jwt_db")
+	jwtColl, _ := c.Get("jwt_coll")
+
+	dbConstraint, _ := jwtDb.(string)
+	collConstraint, _ := jwtColl.(string)
+
+	reqDb := c.Param("database")
+	reqColl := c.Param("collection")
+
+	if dbConstraint != "*" {
+		if reqDb == "" || reqDb != dbConstraint {
+			return false
+		}
+	}
+	if collConstraint != "*" {
+		if reqColl == "" || reqColl != collConstraint {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (s *Server) handleDeleteDatabase(c *gin.Context) {

@@ -33,11 +33,7 @@ func main() {
 	}
 	defer db.Close()
 
-	authenticator, err := auth.New(cfg.APIKeys)
-	if err != nil {
-		slog.Error("configure auth", "error", err)
-		os.Exit(1)
-	}
+	authenticator := auth.New(cfg.AdminKey, cfg.JWTSecret)
 
 	handler := httpapi.NewHandler(db, authenticator, httpapi.Options{
 		MaxBodyBytes: cfg.MaxBodyBytes,

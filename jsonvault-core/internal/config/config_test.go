@@ -26,7 +26,7 @@ var configEnvNames = []string{
 func TestLoadReadsDotEnvAndDefaults(t *testing.T) {
 	clearConfigEnv(t)
 	envPath := filepath.Join(t.TempDir(), ".env")
-	if err := os.WriteFile(envPath, []byte("JSONVAULT_API_KEY=secret\nJSONVAULT_DATA_DIR=./db\nJSONVAULT_CACHE_ENTRIES=12\n"), 0o600); err != nil {
+	if err := os.WriteFile(envPath, []byte("JSONVAULT_ADMIN_KEY=admin_secret\nJSONVAULT_JWT_SECRET=jwt_secret\nJSONVAULT_DATA_DIR=./db\nJSONVAULT_CACHE_ENTRIES=12\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	t.Setenv("JSONVAULT_ENV_FILE", envPath)
@@ -35,8 +35,11 @@ func TestLoadReadsDotEnvAndDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.APIKeys[0] != "secret" {
-		t.Fatalf("unexpected API keys: %#v", cfg.APIKeys)
+	if cfg.AdminKey != "admin_secret" {
+		t.Errorf("expected adminKey admin_secret, got %v", cfg.AdminKey)
+	}
+	if string(cfg.JWTSecret) != "jwt_secret" {
+		t.Errorf("expected jwtSecret jwt_secret, got %v", string(cfg.JWTSecret))
 	}
 	if cfg.DataDir != "./db" {
 		t.Fatalf("DataDir = %q", cfg.DataDir)
@@ -51,18 +54,18 @@ func TestLoadReadsDotEnvAndDefaults(t *testing.T) {
 
 func TestLoadRequiresAPIKey(t *testing.T) {
 	clearConfigEnv(t)
-	t.Setenv("JSONVAULT_ENV_FILE", filepath.Join(t.TempDir(), "missing.env"))
-
+	os.Unsetenv("JSONVAULT_ADMIN_KEY")
 	_, err := Load()
-	if !errors.Is(err, ErrMissingAPIKey) {
-		t.Fatalf("expected ErrMissingAPIKey, got %v", err)
+	if !errors.Is(err, ErrMissingAdminKey) {
+		t.Errorf("expected ErrMissingAdminKey, got %v", err)
 	}
 }
 
 func TestLoadRejectsInvalidCacheEntries(t *testing.T) {
 	clearConfigEnv(t)
 	t.Setenv("JSONVAULT_ENV_FILE", filepath.Join(t.TempDir(), "missing.env"))
-	t.Setenv("JSONVAULT_API_KEY", "secret")
+	os.Setenv("JSONVAULT_ADMIN_KEY", "admin_secret")
+	os.Setenv("JSONVAULT_JWT_SECRET", "jwt_secret")
 	t.Setenv("JSONVAULT_CACHE_ENTRIES", "0")
 
 	_, err := Load()

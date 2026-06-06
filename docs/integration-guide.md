@@ -67,17 +67,24 @@ Instantly broadcast a JSON message to all active SSE subscribers without saving 
 - **Body:** Any valid JSON object (Max 100KB).
 - **Response (202 Accepted):** `{"status": "published"}`
 
+#### Real-Time Presence
+Get the exact number of active SSE connections currently subscribed to a collection. Perfect for showing "Online Users".
+- **Request:** `GET /api/v1/{database}/{collection}/presence`
+- **Response (200 OK):** `{"database": "my_app", "collection": "users", "subscribers": 42}`
+
 ---
 
 ### Documents (CRUD)
 
 #### List Documents
-Retrieve a paginated list of documents, optionally filtered by exact-match fields.
+Retrieve a paginated list of documents, optionally filtered and sorted directly in the query string.
 - **Request:** `GET /api/v1/{database}/{collection}`
   - **Query Parameters:**
     - `limit` (max: 1000, default: 100)
     - `offset` (max: 10000, default: 0)
-    - `filter[<field>]` (e.g., `?filter[status]=active&filter[age]=30`)
+    - `sort` (e.g., `?sort=age` for ascending, or `?sort=-created_at` for descending)
+    - `filter[<field>]` (e.g., `?filter[status]=%22active%22&filter[age]=30`)
+      *Note: Filter values must be valid JSON strings (e.g. `%22string%22` for strings, `true` for booleans, `42` for numbers).*
 - **Response (200 OK):** An array of documents. (Pagination metadata is returned in `X-Total-Count`, `X-Limit`, `X-Offset` headers).
 
 #### Create Document

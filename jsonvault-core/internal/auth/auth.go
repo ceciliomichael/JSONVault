@@ -1,76 +1,78 @@
 package auth
 
 import (
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
-)
 
-var ErrNoAPIKeys = errors.New("at least one API key is required")
+	"github.com/golang-jwt/jwt/v5"
+)
 
 type Scope string
 
 const (
-	ScopeAdmin Scope = "admin"
+	ScopeAdmin     Scope = "admin"
 	ScopeReadWrite Scope = "read_write"
 	ScopeReadOnly  Scope = "read_only"
 )
 
-type keyHash struct {
-	hash  [sha256.Size]byte
-	scope Scope
-}
-
 type Authenticator struct {
-	keyHashes []keyHash
+	adminKey  string
+	jwtSecret []byte
 }
 
-func New(keys []string) (*Authenticator, error) {
-	hashes := make([]keyHash, 0, len(keys))
-	for _, keyStr := range keys {
-		keyStr = strings.TrimSpace(keyStr)
-		if keyStr == "" {
-			continue
-		}
-		
-		parts := strings.SplitN(keyStr, ":", 2)
-		key := parts[0]
-		scope := ScopeAdmin
-		if len(parts) == 2 {
-			scope = Scope(parts[1])
-		}
-
-		hashes = append(hashes, keyHash{
-			hash:  sha256.Sum256([]byte(key)),
-			scope: scope,
-		})
+func New(adminKey string, jwtSecret []byte) *Authenticator {
+	return &Authenticator{
+		adminKey:  adminKey,
+		jwtSecret: jwtSecret,
 	}
-	if len(hashes) == 0 {
-		return nil, ErrNoAPIKeys
-	}
-	return &Authenticator{keyHashes: hashes}, nil
 }
 
-func (a *Authenticator) Authenticate(header string) (bool, Scope) {
-	scheme, token, ok := strings.Cut(strings.TrimSpace(header), " ")
+func (a *Authenticator) Authenticate(header string) (bool, Scope, string, string) {
+	scheme, tokenString, ok := strings.Cut(strings.TrimSpace(header), " ")
 	if !ok || !strings.EqualFold(scheme, "Bearer") {
-		return false, ""
+		return false, "", "", ""
 	}
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return false, ""
+	tokenString = strings.TrimSpace(tokenString)
+	if tokenString == "" {
+		return false, "", "", ""
 	}
 
-	candidate := sha256.Sum256([]byte(token))
-	for _, kh := range a.keyHashes {
-		if subtle.ConstantTimeCompare(candidate[:], kh.hash[:]) == 1 {
-			return true, kh.scope
-		}
+	if tokenString == a.adminKey {
+		return true, ScopeAdmin, "*", "*"
 	}
-	return false, ""
+
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		return a.jwtSecret, nil
+	})
+
+	if err != nil || !token.Valid {
+		return false, "", "", ""
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return false, "", "", ""
+	}
+
+	scopeStr, _ := claims["scope"].(string)
+	db, _ := claims["database"].(string)
+	coll, _ := claims["collection"].(string)
+
+	return true, Scope(scopeStr), db, coll
+}
+
+func (a *Authenticator) GenerateKey(scope Scope, database, collection string) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"scope":      string(scope),
+		"database":   database,
+		"collection": collection,
+	})
+	return token.SignedString(a.jwtSecret)
 }
 
 func (a *Authenticator) Middleware(next http.Handler) http.Handler {
@@ -80,7 +82,7 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		ok, scope := a.Authenticate(r.Header.Get("Authorization"))
+		ok, scope, db, coll := a.Authenticate(r.Header.Get("Authorization"))
 		if !ok {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("WWW-Authenticate", `Bearer realm="jsonvault"`)
@@ -93,8 +95,10 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			})
 			return
 		}
-		
+
 		r.Header.Set("X-API-Scope", string(scope))
+		r.Header.Set("X-API-Database", db)
+		r.Header.Set("X-API-Collection", coll)
 		next.ServeHTTP(w, r)
 	})
 }

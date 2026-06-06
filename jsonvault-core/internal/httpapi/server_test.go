@@ -154,10 +154,9 @@ func testHandler(t *testing.T) http.Handler {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	authenticator, err := auth.New([]string{"secret"})
-	if err != nil {
-		t.Fatalf("auth.New: %v", err)
-	}
+	adminKey := "test_admin_key"
+	jwtSecret := []byte("test_secret")
+	authenticator := auth.New(adminKey, jwtSecret)
 	return NewHandler(db, authenticator, Options{MaxBodyBytes: 1024})
 }
 
@@ -170,7 +169,7 @@ func doJSON(t *testing.T, handler http.Handler, method, path, body string) *http
 		reader = bytes.NewReader([]byte(body))
 	}
 	request := httptest.NewRequest(method, path, reader)
-	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Authorization", "Bearer test_admin_key")
 	if body != "" {
 		request.Header.Set("Content-Type", "application/json")
 	}
