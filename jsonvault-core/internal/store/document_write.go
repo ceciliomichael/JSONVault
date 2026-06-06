@@ -1,15 +1,21 @@
 package store
 
 import (
+	"encoding/binary"
 	stdjson "encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/bytedance/sonic"
 	bolt "go.etcd.io/bbolt"
 )
 
 func (s *Store) CreateDocument(database, collection string, body []byte) (Document, error) {
+	return s.CreateDocumentWithTTL(database, collection, body, 0)
+}
+
+func (s *Store) CreateDocumentWithTTL(database, collection string, body []byte, expireIn time.Duration) (Document, error) {
 	if err := ValidateDatabaseName(database); err != nil {
 		return Document{}, err
 	}
@@ -56,6 +62,11 @@ func (s *Store) CreateDocument(database, collection string, body []byte) (Docume
 		if err := b.Put([]byte(id), encryptedData); err != nil {
 			return err
 		}
+		if expireIn > 0 {
+			if err := setDocumentTTL(tx, collection, id, expireIn); err != nil {
+				return err
+			}
+		}
 		return indexDocumentTx(tx, collection, id, data)
 	})
 
@@ -64,7 +75,7 @@ func (s *Store) CreateDocument(database, collection string, body []byte) (Docume
 	}
 
 	doc := Document{ID: id, Document: stdjson.RawMessage(data), ETag: computeETag(data)}
-	s.publishEvent(Event{
+	s.PublishEvent(Event{
 		Action:     "insert",
 		Database:   database,
 		Collection: collection,
@@ -76,6 +87,10 @@ func (s *Store) CreateDocument(database, collection string, body []byte) (Docume
 }
 
 func (s *Store) PutDocument(database, collection, id string, body []byte, expectedETag string) (Document, error) {
+	return s.PutDocumentWithTTL(database, collection, id, body, expectedETag, 0)
+}
+
+func (s *Store) PutDocumentWithTTL(database, collection, id string, body []byte, expectedETag string, expireIn time.Duration) (Document, error) {
 	if err := ValidateDatabaseName(database); err != nil {
 		return Document{}, err
 	}
@@ -123,6 +138,11 @@ func (s *Store) PutDocument(database, collection, id string, body []byte, expect
 		if err := b.Put([]byte(id), encryptedData); err != nil {
 			return err
 		}
+		if expireIn > 0 {
+			if err := setDocumentTTL(tx, collection, id, expireIn); err != nil {
+				return err
+			}
+		}
 		return indexDocumentTx(tx, collection, id, data)
 	})
 
@@ -134,7 +154,7 @@ func (s *Store) PutDocument(database, collection, id string, body []byte, expect
 	}
 
 	doc := Document{ID: id, Document: stdjson.RawMessage(data), ETag: computeETag(data)}
-	s.publishEvent(Event{
+	s.PublishEvent(Event{
 		Action:     "update",
 		Database:   database,
 		Collection: collection,
@@ -230,7 +250,7 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte, expe
 	}
 
 	doc := Document{ID: id, Document: stdjson.RawMessage(data), ETag: computeETag(data)}
-	s.publishEvent(Event{
+	s.PublishEvent(Event{
 		Action:     "update",
 		Database:   database,
 		Collection: collection,
@@ -291,7 +311,7 @@ func (s *Store) DeleteDocument(database, collection, id string, expectedETag str
 		return fmt.Errorf("delete document: %w", err)
 	}
 
-	s.publishEvent(Event{
+	s.PublishEvent(Event{
 		Action:     "delete",
 		Database:   database,
 		Collection: collection,
@@ -299,4 +319,18 @@ func (s *Store) DeleteDocument(database, collection, id string, expectedETag str
 	})
 
 	return nil
+}
+
+func setDocumentTTL(tx *bolt.Tx, collection, id string, expireIn time.Duration) error {
+	ttlBucket, err := tx.CreateBucketIfNotExists([]byte("__ttl_index__"))
+	if err != nil {
+		return err
+	}
+	expireAt := time.Now().Add(expireIn).Unix()
+	key := make([]byte, 8+len(collection)+1+len(id))
+	binary.BigEndian.PutUint64(key[0:8], uint64(expireAt))
+	copy(key[8:], collection)
+	key[8+len(collection)] = 0
+	copy(key[8+len(collection)+1:], id)
+	return ttlBucket.Put(key, []byte{})
 }

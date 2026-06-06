@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"jsonvault/internal/auth"
+	"jsonvault/internal/store"
 )
 
 func (s *Server) handleSubscribe(c *gin.Context) {
@@ -64,4 +65,34 @@ func (s *Server) handleSubscribe(c *gin.Context) {
 			c.Writer.Flush()
 		}
 	}
+}
+
+func (s *Server) handlePublish(c *gin.Context) {
+	if !s.hasScope(c, auth.ScopeReadWrite) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+
+	database := c.Param("database")
+	collection := c.Param("collection")
+
+	body, err := c.GetRawData()
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	
+	if len(body) > 102400 { // 100KB payload limit to prevent memory abuse on transient streams
+		c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{"error": "payload too large for transient pub/sub (max 100KB)"})
+		return
+	}
+
+	s.store.PublishEvent(store.Event{
+		Action:     "publish",
+		Database:   database,
+		Collection: collection,
+		Document:   json.RawMessage(body),
+	})
+
+	c.JSON(http.StatusAccepted, gin.H{"status": "published"})
 }

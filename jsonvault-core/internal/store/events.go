@@ -65,8 +65,8 @@ func (s *Store) Unsubscribe(sub *Subscription) {
 	}
 }
 
-// publishEvent broadcasts an event to all active subscribers for that collection.
-func (s *Store) publishEvent(event Event) {
+// PublishEvent broadcasts an event to all active subscribers for that collection.
+func (s *Store) PublishEvent(event Event) {
 	s.subMu.RLock()
 	defer s.subMu.RUnlock()
 

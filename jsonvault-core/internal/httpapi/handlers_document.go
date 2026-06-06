@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bytedance/sonic"
 	"github.com/gin-gonic/gin"
@@ -86,7 +87,9 @@ func (s *Server) handleCollectionDocuments(c *gin.Context) {
 		if !ok {
 			return
 		}
-		document, err := s.store.CreateDocument(database, collection, body)
+		
+		expireIn := parseExpireIn(c)
+		document, err := s.store.CreateDocumentWithTTL(database, collection, body, expireIn)
 		if err != nil {
 			s.handleStoreError(c, err)
 			return
@@ -125,7 +128,9 @@ func (s *Server) handleDocumentByID(c *gin.Context) {
 		if !ok {
 			return
 		}
-		document, err := s.store.PutDocument(database, collection, id, body, c.GetHeader("If-Match"))
+		
+		expireIn := parseExpireIn(c)
+		document, err := s.store.PutDocumentWithTTL(database, collection, id, body, c.GetHeader("If-Match"), expireIn)
 		if err != nil {
 			if errors.Is(err, store.ErrPreconditionFailed) {
 				c.JSON(http.StatusPreconditionFailed, gin.H{"error": gin.H{"code": "precondition_failed", "message": "ETag mismatch"}})
@@ -199,4 +204,16 @@ func (s *Server) readDocumentBodyGin(c *gin.Context) ([]byte, bool) {
 		return nil, false
 	}
 	return data, true
+}
+
+func parseExpireIn(c *gin.Context) time.Duration {
+	expireStr := c.GetHeader("X-Expire-In")
+	if expireStr == "" {
+		return 0
+	}
+	expireInt, err := strconv.ParseInt(expireStr, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return time.Duration(expireInt) * time.Second
 }

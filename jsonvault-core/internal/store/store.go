@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	stdjson "encoding/json"
 	"errors"
@@ -76,6 +77,83 @@ func New(root string, cacheEntries int, encryptionKey []byte) (*Store, error) {
 		dbs:           make(map[string]*DBHandle),
 	}
 	return s, nil
+}
+
+
+func (s *Store) StartTTLWorker(ctx context.Context) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.purgeExpiredDocuments()
+		}
+	}
+}
+
+func (s *Store) purgeExpiredDocuments() {
+	s.mu.RLock()
+	dbNames := make(map[string]*DBHandle)
+	for name, h := range s.dbs {
+		dbNames[name] = h
+	}
+	s.mu.RUnlock()
+
+	nowUnix := uint64(time.Now().Unix())
+
+	for dbName, h := range dbNames {
+		h.gate.RLock()
+		db := h.db
+		h.gate.RUnlock()
+
+		if db == nil {
+			continue
+		}
+
+		_ = db.Update(func(tx *bolt.Tx) error {
+			ttlBucket := tx.Bucket([]byte("__ttl_index__"))
+			if ttlBucket == nil {
+				return nil
+			}
+
+			c := ttlBucket.Cursor()
+			for k, _ := c.First(); k != nil; k, _ = c.Next() {
+				if len(k) < 10 {
+					continue
+				}
+				expireAt := binary.BigEndian.Uint64(k[0:8])
+				if expireAt > nowUnix {
+					break // Keys are chronologically sorted! We can stop immediately.
+				}
+
+				rest := k[8:]
+				idx := bytes.IndexByte(rest, 0)
+				if idx == -1 {
+					continue
+				}
+				collection := string(rest[:idx])
+				id := string(rest[idx+1:])
+
+				b := tx.Bucket([]byte(collection))
+				if b != nil {
+					_ = b.Delete([]byte(id))
+					_ = incrementCollectionCountTx(tx, collection, -1, b)
+					
+					s.PublishEvent(Event{
+						Action:     "delete",
+						Database:   dbName,
+						Collection: collection,
+						DocumentID: id,
+					})
+				}
+				_ = c.Delete()
+			}
+			return nil
+		})
+	}
 }
 
 func (s *Store) Close() error {

@@ -61,6 +61,12 @@ Open a persistent HTTP connection to receive live document mutations.
   ```
 *(Note: To prevent proxies from dropping idle connections, JSONVault sends a silent `: keepalive` comment every 15 seconds. Standard EventSource clients handle this automatically).*
 
+#### Publish Transient Message (Pub/Sub)
+Instantly broadcast a JSON message to all active SSE subscribers without saving it to the database disk. Perfect for ephemeral events like "User is typing...".
+- **Request:** `POST /api/v1/{database}/{collection}/publish`
+- **Body:** Any valid JSON object (Max 100KB).
+- **Response (202 Accepted):** `{"status": "published"}`
+
 ---
 
 ### Documents (CRUD)
@@ -76,6 +82,7 @@ Retrieve a paginated list of documents, optionally filtered by exact-match field
 
 #### Create Document
 - **Request:** `POST /api/v1/{database}/{collection}`
+- **Headers:** `X-Expire-In: <seconds>` (Optional: Automatically delete document after X seconds)
 - **Body:** Any valid JSON object.
 - **Response (201 Created):** Returns the auto-generated `id` and the generated `ETag` header.
 
@@ -83,10 +90,12 @@ Retrieve a paginated list of documents, optionally filtered by exact-match field
 - **Request:** `GET /api/v1/{database}/{collection}/{id}`
 - **Response (200 OK):** Returns the document and its `ETag` header.
 
-#### Update Document (Replace)
-Completely overwrites the document.
+#### Update or Create Document (Upsert)
+Completely overwrites the document if it exists, or creates a new document using the `{id}` you provide.
 - **Request:** `PUT /api/v1/{database}/{collection}/{id}`
-- **Headers:** `If-Match: <your-etag>` (Optional, but highly recommended)
+- **Headers:** 
+  - `If-Match: <your-etag>` (Optional, but highly recommended if updating)
+  - `X-Expire-In: <seconds>` (Optional: Automatically delete document after X seconds)
 - **Body:** The full new JSON object.
 
 #### Partial Update Document (Merge)

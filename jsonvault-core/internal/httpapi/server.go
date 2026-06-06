@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"jsonvault/internal/auth"
 	"jsonvault/internal/store"
+	"time"
 )
 
 const defaultMaxBodyBytes int64 = 10 * 1024 * 1024
@@ -22,9 +23,11 @@ type Store interface {
 	ListCollections(database string) ([]string, error)
 	DeleteCollection(database, collection string) error
 	CreateDocument(database, collection string, body []byte) (store.Document, error)
+	CreateDocumentWithTTL(database, collection string, body []byte, expireIn time.Duration) (store.Document, error)
 	ListDocuments(ctx context.Context, database, collection string, limit, offset int, filter map[string]interface{}) ([]store.Document, int, error)
 	GetDocument(database, collection, id string) (store.Document, error)
 	PutDocument(database, collection, id string, body []byte, expectedETag string) (store.Document, error)
+	PutDocumentWithTTL(database, collection, id string, body []byte, expectedETag string, expireIn time.Duration) (store.Document, error)
 	PatchDocument(database, collection, id string, body []byte, expectedETag string) (store.Document, error)
 	DeleteDocument(database, collection, id string, expectedETag string) error
 
@@ -36,6 +39,7 @@ type Store interface {
 	
 	Subscribe(database, collection string) *store.Subscription
 	Unsubscribe(sub *store.Subscription)
+	PublishEvent(event store.Event)
 }
 
 type Options struct {
@@ -120,6 +124,7 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 		v1.DELETE("/:database/:collection/indexes/:field", server.handleDeleteIndex)
 
 		v1.GET("/:database/:collection/subscribe", server.handleSubscribe)
+		v1.POST("/:database/:collection/publish", server.handlePublish)
 
 		v1.GET("/:database/:collection/:id", server.handleDocumentByID)
 		v1.PUT("/:database/:collection/:id", server.handleDocumentByID)
@@ -175,6 +180,7 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 		v1.DELETE("/:database/:collection/indexes/:field", server.handleDeleteIndex)
 
 		v1.GET("/:database/:collection/subscribe", server.handleSubscribe)
+		v1.POST("/:database/:collection/publish", server.handlePublish)
 
 		v1.GET("/:database/:collection/:id", server.handleDocumentByID)
 		v1.PUT("/:database/:collection/:id", server.handleDocumentByID)
