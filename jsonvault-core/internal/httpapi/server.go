@@ -24,7 +24,7 @@ type Store interface {
 	DeleteCollection(database, collection string) error
 	CreateDocument(database, collection string, body []byte) (store.Document, error)
 	CreateDocumentWithTTL(database, collection string, body []byte, expireIn time.Duration) (store.Document, error)
-	ListDocuments(ctx context.Context, database, collection string, limit, offset int, filter map[string]interface{}) ([]store.Document, int, error)
+	ListDocuments(ctx context.Context, database, collection string, limit, offset int, filter map[string]interface{}, sortField string) ([]store.Document, int, error)
 	GetDocument(database, collection, id string) (store.Document, error)
 	PutDocument(database, collection, id string, body []byte, expectedETag string) (store.Document, error)
 	PutDocumentWithTTL(database, collection, id string, body []byte, expectedETag string, expireIn time.Duration) (store.Document, error)
@@ -40,6 +40,7 @@ type Store interface {
 	Subscribe(database, collection string) *store.Subscription
 	Unsubscribe(sub *store.Subscription)
 	PublishEvent(event store.Event)
+	GetSubscriberCount(database, collection string) int
 }
 
 type Options struct {
@@ -181,6 +182,7 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 
 		v1.GET("/:database/:collection/subscribe", server.handleSubscribe)
 		v1.POST("/:database/:collection/publish", server.handlePublish)
+		v1.GET("/:database/:collection/presence", server.handlePresence)
 
 		v1.GET("/:database/:collection/:id", server.handleDocumentByID)
 		v1.PUT("/:database/:collection/:id", server.handleDocumentByID)

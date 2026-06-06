@@ -59,7 +59,7 @@ func TestStoreDocumentCRUDPersistsJSON(t *testing.T) {
 		t.Fatalf("unexpected updated document: %s", updated.Document)
 	}
 
-	documents, _, err := db.ListDocuments(context.Background(), "testdb", "users", 100, 0, nil)
+	documents, _, err := db.ListDocuments(context.Background(), "testdb", "users", 100, 0, nil, "")
 	if err != nil {
 		t.Fatalf("ListDocuments: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestStoreConcurrentCreatesStayValid(t *testing.T) {
 		}
 	}
 
-	documents, _, err := db.ListDocuments(context.Background(), "testdb", "events", 100, 0, nil)
+	documents, _, err := db.ListDocuments(context.Background(), "testdb", "events", 100, 0, nil, "")
 	if err != nil {
 		t.Fatalf("ListDocuments: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestStoreLongOperationsRespectCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, _, err := db.ListDocuments(ctx, "testdb", "events", 100, 0, nil); !errors.Is(err, context.Canceled) {
+	if _, _, err := db.ListDocuments(ctx, "testdb", "events", 100, 0, nil, ""); !errors.Is(err, context.Canceled) {
 		t.Fatalf("ListDocuments error = %v, want context.Canceled", err)
 	}
 	if err := db.CreateIndex(ctx, "testdb", "events", "type"); !errors.Is(err, context.Canceled) {

@@ -65,6 +65,22 @@ func (s *Store) Unsubscribe(sub *Subscription) {
 	}
 }
 
+// GetSubscriberCount returns the number of active subscribers for a collection.
+func (s *Store) GetSubscriberCount(database, collection string) int {
+	s.subMu.RLock()
+	defer s.subMu.RUnlock()
+
+	if s.subscribers == nil {
+		return 0
+	}
+	if colls, ok := s.subscribers[database]; ok {
+		if subs, ok := colls[collection]; ok {
+			return len(subs)
+		}
+	}
+	return 0
+}
+
 // PublishEvent broadcasts an event to all active subscribers for that collection.
 func (s *Store) PublishEvent(event Event) {
 	s.subMu.RLock()

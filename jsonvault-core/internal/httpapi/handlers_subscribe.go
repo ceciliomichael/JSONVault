@@ -93,6 +93,23 @@ func (s *Server) handlePublish(c *gin.Context) {
 		Collection: collection,
 		Document:   json.RawMessage(body),
 	})
+	c.JSON(http.StatusAccepted, gin.H{"published": true, "database": database, "collection": collection})
+}
 
-	c.JSON(http.StatusAccepted, gin.H{"status": "published"})
+// handlePresence returns the number of active subscribers for a collection
+func (s *Server) handlePresence(c *gin.Context) {
+	if !s.hasScope(c, auth.ScopeReadOnly) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+
+	database := c.Param("database")
+	collection := c.Param("collection")
+
+	count := s.store.GetSubscriberCount(database, collection)
+	c.JSON(http.StatusOK, gin.H{
+		"database":   database,
+		"collection": collection,
+		"subscribers": count,
+	})
 }

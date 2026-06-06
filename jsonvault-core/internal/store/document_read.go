@@ -7,12 +7,15 @@ import (
 	"os"
 	"path/filepath"
 
+	"sort"
+	"strings"
+
 	stdjson "encoding/json"
 	"github.com/bytedance/sonic"
 	bolt "go.etcd.io/bbolt"
 )
 
-func (s *Store) ListDocuments(ctx context.Context, database, collection string, limit, offset int, filter map[string]interface{}) ([]Document, int, error) {
+func (s *Store) ListDocuments(ctx context.Context, database, collection string, limit, offset int, filter map[string]interface{}, sortField string) ([]Document, int, error) {
 	ctx = contextOrBackground(ctx)
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
@@ -138,7 +141,7 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 							}
 
 							if matches {
-								if matched >= offset && len(documents) < limit {
+								if sortField != "" || (matched >= offset && len(documents) < limit) {
 									documents = append(documents, Document{
 										ID:       string(k),
 										Document: stdjson.RawMessage(plaintext),
@@ -158,7 +161,7 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				if len(documents) >= limit {
+				if len(documents) >= limit && sortField == "" {
 					if len(filter) == 0 {
 						break
 					}
@@ -186,7 +189,7 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 				}
 
 				if matches {
-					if matched >= offset && len(documents) < limit {
+					if sortField != "" || (matched >= offset && len(documents) < limit) {
 						documents = append(documents, Document{
 							ID:       string(k),
 							Document: stdjson.RawMessage(plaintext),
@@ -205,6 +208,37 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 			return nil, 0, ErrNotFound
 		}
 		return nil, 0, fmt.Errorf("list documents: %w", err)
+	}
+
+	// Apply sorting if requested
+	if sortField != "" && len(documents) > 0 {
+		desc := false
+		if strings.HasPrefix(sortField, "-") {
+			desc = true
+			sortField = sortField[1:]
+		}
+		sort.SliceStable(documents, func(i, j int) bool {
+			var a, b map[string]interface{}
+			_ = sonic.Unmarshal(documents[i].Document, &a)
+			_ = sonic.Unmarshal(documents[j].Document, &b)
+			valA := encodeIndexValue(a[sortField])
+			valB := encodeIndexValue(b[sortField])
+			if desc {
+				return valA > valB
+			}
+			return valA < valB
+		})
+
+		// Apply offset and limit after sorting
+		start := offset
+		if start > len(documents) {
+			start = len(documents)
+		}
+		end := start + limit
+		if end > len(documents) {
+			end = len(documents)
+		}
+		documents = documents[start:end]
 	}
 
 	// Deep copy required because slices inside bolt.Tx become invalid after tx closes
