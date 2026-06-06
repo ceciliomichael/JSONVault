@@ -11,6 +11,7 @@ When you build an app (like a to-do list, a blog, or an e-commerce site), that a
 - **Self-Organizing:** You don't need to spend hours setting up complex database schemas before you start coding. Just send your data. If a folder (we call them "Databases" and "Collections") doesn't exist yet, JSONVault creates it automatically on the fly.
 - **Incredibly Secure:** Out of the box, JSONVault encrypts all of your data. If someone were to steal the hard drive where JSONVault lives, your data would just look like scrambled gibberish without your secret encryption key.
 - **Protects Your Data:** It uses "Optimistic Concurrency Control". In plain English: if two users try to edit the exact same document at the exact same split-second, JSONVault ensures one doesn't accidentally overwrite the other's changes.
+- **Real-Time Magic:** It natively supports blazing-fast real-time subscriptions. If a document changes in the database, JSONVault instantly pushes the update to your frontend so your users see live updates without ever refreshing the page!
 
 ## Who is this for?
 JSONVault is perfect for developers, startups, and hobbyists who want the power and speed of a professional database without the headaches of managing massive, complicated infrastructure like Postgres or MongoDB. It runs smoothly, requires almost zero maintenance, and just gets out of your way so you can focus on building your app.

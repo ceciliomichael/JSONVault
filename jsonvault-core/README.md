@@ -1,21 +1,40 @@
-# JSONVault
+# JSONVault Core Engine
 
-JSONVault is a fast, secure, and incredibly simple place to store your application's data. 
+Welcome to the engine room! `jsonvault-core` is the lightweight, fast, and secure Go-based NoSQL database server powering JSONVault. It exposes a simple REST API and supports real-time subscriptions, making it incredibly easy to store, query, and sync JSON documents.
 
-Think of it like a highly organized digital filing cabinet. Instead of dealing with complex spreadsheets, rigid tables, or writing complicated database queries, JSONVault lets your application save its data exactly as it naturally looks—as standard JSON documents. 
+## Key Features
+- **Simple REST API**: Standard CRUD operations using JSON over HTTP.
+- **Real-Time Subscriptions**: Built-in Server-Sent Events (SSE) to stream changes to clients automatically.
+- **Ultra-Lightweight**: Designed to run efficiently with a minimal CPU and memory footprint (perfect for budget VPS environments).
+- **Secure**: Authentication with API keys and encryption at rest.
 
-## What does it do?
-When you build an app (like a to-do list, a blog, or an e-commerce site), that app needs a brain to remember things. JSONVault acts as that brain. 
+## Getting Started
 
-- **Easy to Talk To:** It communicates over the internet using simple HTTP requests (the exact same language your web browser uses). Your app can say "Hey JSONVault, save this user profile," or "Hey JSONVault, give me all the tasks for today," and JSONVault instantly responds.
-- **Self-Organizing:** You don't need to spend hours setting up complex database schemas before you start coding. Just send your data. If a folder (we call them "Databases" and "Collections") doesn't exist yet, JSONVault creates it automatically on the fly.
-- **Incredibly Secure:** Out of the box, JSONVault encrypts all of your data. If someone were to steal the hard drive where JSONVault lives, your data would just look like scrambled gibberish without your secret encryption key.
-- **Protects Your Data:** It uses "Optimistic Concurrency Control". In plain English: if two users try to edit the exact same document at the exact same split-second, JSONVault ensures one doesn't accidentally overwrite the other's changes.
+### Prerequisites
+- Go 1.21 or later installed.
 
-## Who is this for?
-JSONVault is perfect for developers, startups, and hobbyists who want the power and speed of a professional database without the headaches of managing massive, complicated infrastructure like Postgres or MongoDB. It runs smoothly, requires almost zero maintenance, and just gets out of your way so you can focus on building your app.
+### Quick Start
+1. **Clone & Setup**:
+   Copy the example environment file to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. **Run the Server**:
+   Start the server locally:
+   ```bash
+   go run ./cmd/jsonvault
+   ```
+   By default, it will start listening on the port configured in your `.env` file (e.g. `:5766`).
+
+3. **Run Tests**:
+   Ensure everything is working correctly by running the test suite:
+   ```bash
+   go test ./... -v
+   ```
 
 ## Where to start?
-If you're a developer ready to plug your app into JSONVault, check out the documentation:
-- **[Client Integration Guide](../docs/integration-guide.md):** Learn how to connect your app, save data, and fetch it.
-- **[Server Guide](../docs/server-guide.md):** Learn how to host JSONVault, manage API keys, and configure the engine.
+To integrate JSONVault into your apps or manage your deployment, check out the documentation in the root `docs/` folder:
+- **[Client Integration Guide](../docs/integration-guide.md):** Learn how to connect your application, read/write data, and subscribe to real-time events.
+- **[Server Guide](../docs/server-guide.md):** Learn how to configure settings, manage API keys, and host the database.
+
