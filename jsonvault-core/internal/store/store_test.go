@@ -218,9 +218,14 @@ func TestStoreLongOperationsRespectCanceledContext(t *testing.T) {
 	if err := db.CreateIndex(ctx, "testdb", "events", "type"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("CreateIndex error = %v, want context.Canceled", err)
 	}
+
 	if err := db.BackupDatabase(ctx, "testdb", bytes.NewBuffer(nil)); !errors.Is(err, context.Canceled) {
 		t.Fatalf("BackupDatabase error = %v, want context.Canceled", err)
 	}
+
+	// Give async webhooks triggered by CreateDocument time to complete 
+	// before the test cleans up the TempDir, avoiding bbolt file-lock panics on Windows.
+	time.Sleep(50 * time.Millisecond)
 }
 
 func TestListCollectionsHidesInternalBuckets(t *testing.T) {

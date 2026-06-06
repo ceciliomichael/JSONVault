@@ -108,6 +108,7 @@ Completely overwrites the document if it exists, or creates a new document using
   - `If-Match: <your-etag>` (Optional, but highly recommended if updating)
   - `X-Expire-In: <seconds>` (Optional: Automatically delete document after X seconds)
 - **Body:** The full new JSON object.
+- **Response (200 OK):** Returns the upserted document and its `ETag` header.
 
 #### Partial Update Document (Merge)
 Updates specific fields while preserving the rest (e.g. only updating `status: "completed"`).

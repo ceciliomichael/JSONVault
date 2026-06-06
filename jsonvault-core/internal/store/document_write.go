@@ -120,27 +120,37 @@ func (s *Store) PutDocumentWithTTL(database, collection, id string, body []byte,
 		return Document{}, err
 	}
 
+	var isInsert bool
+
 	err = db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(collection))
-		if b == nil {
-			return ErrNotFound
-		}
-		existingData := b.Get([]byte(id))
-		if existingData == nil {
-			return ErrNotFound
-		}
-
-		existingPlaintext, err := decryptDocument(existingData, s.encryptionKey)
+		b, err := tx.CreateBucketIfNotExists([]byte(collection))
 		if err != nil {
-			return fmt.Errorf("corrupt document (decrypt): %w", err)
+			return err
 		}
 
-		if expectedETag != "" && !matchETags(computeETag(existingPlaintext), expectedETag) {
-			return ErrPreconditionFailed
+		existingData := b.Get([]byte(id))
+		if existingData != nil {
+			existingPlaintext, err := decryptDocument(existingData, s.encryptionKey)
+			if err != nil {
+				return fmt.Errorf("corrupt document (decrypt): %w", err)
+			}
+	
+			if expectedETag != "" && !matchETags(computeETag(existingPlaintext), expectedETag) {
+				return ErrPreconditionFailed
+			}
+			if err := unindexDocumentTx(tx, collection, id, existingPlaintext); err != nil {
+				return fmt.Errorf("unindex old document: %w", err)
+			}
+		} else {
+			if expectedETag != "" && expectedETag != "*" {
+				return ErrPreconditionFailed
+			}
+			isInsert = true
+			if err := incrementCollectionCountTx(tx, collection, 1, b); err != nil {
+				return err
+			}
 		}
-		if err := unindexDocumentTx(tx, collection, id, existingPlaintext); err != nil {
-			return fmt.Errorf("unindex old document: %w", err)
-		}
+
 		if err := b.Put([]byte(id), encryptedData); err != nil {
 			return err
 		}
@@ -153,15 +163,21 @@ func (s *Store) PutDocumentWithTTL(database, collection, id string, body []byte,
 	})
 
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return Document{}, ErrNotFound
+		if errors.Is(err, ErrPreconditionFailed) {
+			return Document{}, ErrPreconditionFailed
 		}
 		return Document{}, fmt.Errorf("put document: %w", err)
 	}
 
 	doc := Document{ID: id, Document: stdjson.RawMessage(data), ETag: computeETag(data)}
+	
+	action := "update"
+	if isInsert {
+		action = "insert"
+	}
+	
 	s.PublishEvent(Event{
-		Action:     "update",
+		Action:     action,
 		Database:   database,
 		Collection: collection,
 		DocumentID: id,
