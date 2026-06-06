@@ -26,6 +26,9 @@ type Store struct {
 	encryptionKey []byte
 	mu            sync.RWMutex
 	dbs           map[string]*DBHandle
+
+	subMu       sync.RWMutex
+	subscribers map[string]map[string]map[*Subscription]struct{}
 }
 
 type Document struct {

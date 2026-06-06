@@ -33,6 +33,9 @@ type Store interface {
 	DeleteIndex(database, collection, field string) error
 
 	BackupDatabase(ctx context.Context, database string, w io.Writer) error
+	
+	Subscribe(database, collection string) *store.Subscription
+	Unsubscribe(sub *store.Subscription)
 }
 
 type Options struct {
@@ -116,6 +119,8 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 		v1.POST("/:database/:collection/indexes", server.handleCreateIndex)
 		v1.DELETE("/:database/:collection/indexes/:field", server.handleDeleteIndex)
 
+		v1.GET("/:database/:collection/subscribe", server.handleSubscribe)
+
 		v1.GET("/:database/:collection/:id", server.handleDocumentByID)
 		v1.PUT("/:database/:collection/:id", server.handleDocumentByID)
 		v1.PATCH("/:database/:collection/:id", server.handleDocumentByID)
@@ -168,6 +173,8 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 		v1.GET("/:database/:collection/indexes", server.handleListIndexes)
 		v1.POST("/:database/:collection/indexes", server.handleCreateIndex)
 		v1.DELETE("/:database/:collection/indexes/:field", server.handleDeleteIndex)
+
+		v1.GET("/:database/:collection/subscribe", server.handleSubscribe)
 
 		v1.GET("/:database/:collection/:id", server.handleDocumentByID)
 		v1.PUT("/:database/:collection/:id", server.handleDocumentByID)

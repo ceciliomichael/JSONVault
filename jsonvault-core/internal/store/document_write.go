@@ -63,7 +63,15 @@ func (s *Store) CreateDocument(database, collection string, body []byte) (Docume
 		return Document{}, fmt.Errorf("create document: %w", err)
 	}
 
-	return Document{ID: id, Document: stdjson.RawMessage(data), ETag: computeETag(data)}, nil
+	doc := Document{ID: id, Document: stdjson.RawMessage(data), ETag: computeETag(data)}
+	s.publishEvent(Event{
+		Action:     "insert",
+		Database:   database,
+		Collection: collection,
+		DocumentID: id,
+		Document:   doc.Document,
+	})
+	return doc, nil
 }
 
 func (s *Store) PutDocument(database, collection, id string, body []byte, expectedETag string) (Document, error) {
@@ -124,7 +132,15 @@ func (s *Store) PutDocument(database, collection, id string, body []byte, expect
 		return Document{}, fmt.Errorf("put document: %w", err)
 	}
 
-	return Document{ID: id, Document: stdjson.RawMessage(data), ETag: computeETag(data)}, nil
+	doc := Document{ID: id, Document: stdjson.RawMessage(data), ETag: computeETag(data)}
+	s.publishEvent(Event{
+		Action:     "update",
+		Database:   database,
+		Collection: collection,
+		DocumentID: id,
+		Document:   doc.Document,
+	})
+	return doc, nil
 }
 
 func (s *Store) PatchDocument(database, collection, id string, body []byte, expectedETag string) (Document, error) {
@@ -211,7 +227,15 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte, expe
 		return Document{}, fmt.Errorf("patch document: %w", err)
 	}
 
-	return Document{ID: id, Document: stdjson.RawMessage(data), ETag: computeETag(data)}, nil
+	doc := Document{ID: id, Document: stdjson.RawMessage(data), ETag: computeETag(data)}
+	s.publishEvent(Event{
+		Action:     "update",
+		Database:   database,
+		Collection: collection,
+		DocumentID: id,
+		Document:   doc.Document,
+	})
+	return doc, nil
 }
 
 func (s *Store) DeleteDocument(database, collection, id string, expectedETag string) error {
@@ -263,6 +287,13 @@ func (s *Store) DeleteDocument(database, collection, id string, expectedETag str
 		}
 		return fmt.Errorf("delete document: %w", err)
 	}
+
+	s.publishEvent(Event{
+		Action:     "delete",
+		Database:   database,
+		Collection: collection,
+		DocumentID: id,
+	})
 
 	return nil
 }

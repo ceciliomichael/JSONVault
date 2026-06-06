@@ -142,6 +142,25 @@ Checks if the database server is reachable.
   }
   ```
 
+### 5. Real-Time Subscriptions
+
+JSONVault natively supports real-time document streaming via Server-Sent Events (SSE). You can subscribe to a collection to receive instant pushes whenever a document is inserted, updated, or deleted.
+
+#### Subscribe to Collection
+- **Request:** `GET /api/v1/{database}/{collection}/subscribe`
+- **Headers:** `Authorization: Bearer <your-api-key>`
+- **Response:** An infinite HTTP stream of `text/event-stream`.
+- **Event Format:**
+  ```text
+  data: {"action":"insert","database":"{database}","collection":"{collection}","document_id":"<id>","document":{...}}
+  
+  data: {"action":"update","database":"{database}","collection":"{collection}","document_id":"<id>","document":{...}}
+  
+  data: {"action":"delete","database":"{database}","collection":"{collection}","document_id":"<id>"}
+  ```
+
+*(Note: The server will automatically send a silent `: keepalive` comment every 15 seconds to prevent load balancers like Cloudflare or Nginx from dropping the connection. Your browser's `EventSource` will automatically ignore these comments.)*
+
 ---
 
 ## Errors
