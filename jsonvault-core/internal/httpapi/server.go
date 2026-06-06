@@ -158,6 +158,7 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 
 		v1.GET("/:database/:collection/subscribe", server.handleSubscribe)
 		v1.POST("/:database/:collection/publish", server.handlePublish)
+		v1.GET("/:database/:collection/presence", server.handlePresence)
 
 		v1.GET("/:database/:collection/:id", server.handleDocumentByID)
 		v1.PUT("/:database/:collection/:id", server.handleDocumentByID)
