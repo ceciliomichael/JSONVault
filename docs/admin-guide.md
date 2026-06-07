@@ -23,6 +23,8 @@ Your dashboard backend should use the Admin Key to programmatically generate res
   ```json
   {
     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "jti": "1f6d2d2b8c9a4e0d9f1b2c3a4d5e6f70",
+    "expires_at": "2026-09-05T12:00:00Z",
     "scope": "read_write",
     "database": "proj_abc123",
     "collection": "*"
@@ -30,7 +32,7 @@ Your dashboard backend should use the Admin Key to programmatically generate res
   ```
 
 ### Option 2: Offline Generation (For Dashboard Backends)
-If you are building a dashboard (like Firebase/Supabase), your backend doesn't even need to hit the JSONVault API to create keys! Because JWTs are stateless, your backend can generate the token instantly using any standard JWT library in any language (Go, Python, PHP, Node.js, Ruby, etc.).
+If you are building a dashboard (like Firebase/Supabase), your backend doesn't need to hit the JSONVault API to create keys. Your backend can generate the JWT instantly using any standard JWT library in any language (Go, Python, PHP, Node.js, Ruby, etc.).
 
 **Requirements:**
 1. **Algorithm:** HMAC SHA-256 (`HS256`)
@@ -39,14 +41,32 @@ If you are building a dashboard (like Firebase/Supabase), your backend doesn't e
    - `scope`: String (either `"read_only"`, `"read_write"`, or `"admin"`)
    - `database`: String (the specific database name, or `"*"` for all)
    - `collection`: String (the specific collection name, or `"*"` for all)
+   - `iat`: Issued-at Unix timestamp
+   - `nbf`: Not-before Unix timestamp
+   - `exp`: Expiration Unix timestamp
+   - `jti`: Unique token ID used for revocation
 
 Once your backend signs this payload, the resulting token string is immediately valid on your JSONVault server!
 Provide this `"token"` string to the user so they can connect their frontend app to their specific database!
 
 ## Key Revocation & Expiration
-Because JSONVault uses **Stateless JWTs**, the tokens are not saved anywhere on the JSONVault server disk. They only exist mathematically. 
+Keys generated through `POST /api/v1/admin/keys` expire automatically after 90 days.
 
-If your `JSONVAULT_JWT_SECRET` is ever compromised, or if you want to globally invalidate all active API keys ever issued, you simply change `JSONVAULT_JWT_SECRET` in your `.env` file and restart the server. **All old keys will instantly stop working.**
+To revoke one key, store the returned `jti` when you create it and call:
+
+- **Request:** `DELETE /api/v1/admin/keys/{jti}`
+- **Headers:** `Authorization: Bearer <your-admin-key>`
+- **Response (200 OK):**
+  ```json
+  {
+    "revoked": true,
+    "jti": "1f6d2d2b8c9a4e0d9f1b2c3a4d5e6f70"
+  }
+  ```
+
+The main JSONVault server persists revoked token IDs in `revoked-jwts.json` under `JSONVAULT_DATA_DIR`.
+
+If your `JSONVAULT_JWT_SECRET` is ever compromised, or if you want to globally invalidate all active API keys ever issued, change `JSONVAULT_JWT_SECRET` in your `.env` file and restart the server. **All old keys will instantly stop working.**
 
 ## Server Security & Webhook SSRF
 

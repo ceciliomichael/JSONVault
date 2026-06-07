@@ -58,17 +58,41 @@ func TestTransientPublish(t *testing.T) {
 
 	line = strings.TrimSpace(line)
 	jsonStr := strings.TrimPrefix(line, "data: ")
-	
+
 	var event store.Event
 	json.Unmarshal([]byte(jsonStr), &event)
 
 	if event.Action != "publish" {
 		t.Errorf("expected action 'publish', got '%s'", event.Action)
 	}
-	
+
 	var docData map[string]interface{}
 	json.Unmarshal(event.Document, &docData)
 	if docData["message"] != "hello world" {
 		t.Errorf("expected message 'hello world', got %v", docData)
+	}
+}
+
+func TestPublishRejectsInvalidJSON(t *testing.T) {
+	db, err := store.New(t.TempDir(), 10, nil)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer db.Close()
+
+	handler := NewUnauthenticatedHandler(db, Options{MaxBodyBytes: 1024 * 1024})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, server.URL+"/api/v1/testdb/testcol/publish", bytes.NewReader([]byte(`not-json`)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
 	}
 }

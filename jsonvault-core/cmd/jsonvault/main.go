@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"jsonvault/internal/auth"
@@ -26,17 +27,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	db, err := store.New(cfg.DataDir, cfg.CacheEntries, cfg.EncryptionKey)
+	db, err := store.NewWithOptions(cfg.DataDir, cfg.CacheEntries, cfg.EncryptionKey, store.Options{
+		EncryptionRequired: cfg.EncryptionRequired,
+	})
 	if err != nil {
 		slog.Error("open store", "error", err)
 		os.Exit(1)
 	}
 	defer db.Close()
 
-	authenticator := auth.New(cfg.AdminKey, cfg.JWTSecret)
+	authenticator, err := auth.NewWithRevocationFile(cfg.AdminKey, cfg.JWTSecret, filepath.Join(cfg.DataDir, "revoked-jwts.json"))
+	if err != nil {
+		slog.Error("load revoked jwt list", "error", err)
+		os.Exit(1)
+	}
 
 	handler := httpapi.NewHandler(db, authenticator, httpapi.Options{
-		MaxBodyBytes: cfg.MaxBodyBytes,
+		MaxBodyBytes:   cfg.MaxBodyBytes,
+		AdminRateLimit: cfg.AdminRateLimit,
 	})
 
 	server := &http.Server{

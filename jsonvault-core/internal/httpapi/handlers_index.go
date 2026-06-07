@@ -37,8 +37,8 @@ func (s *Server) handleListIndexes(c *gin.Context) {
 }
 
 func (s *Server) handleCreateIndex(c *gin.Context) {
-	if !s.hasScope(c, auth.ScopeReadWrite) {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "read_write scope required to create indexes"})
+	if !s.hasScope(c, auth.ScopeAdmin) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin scope required to create indexes"})
 		return
 	}
 
@@ -59,8 +59,8 @@ func (s *Server) handleCreateIndex(c *gin.Context) {
 }
 
 func (s *Server) handleDeleteIndex(c *gin.Context) {
-	if !s.hasScope(c, auth.ScopeReadWrite) {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "read_write scope required to delete indexes"})
+	if !s.hasScope(c, auth.ScopeAdmin) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin scope required to delete indexes"})
 		return
 	}
 

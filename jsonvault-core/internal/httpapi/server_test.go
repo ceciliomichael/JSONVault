@@ -148,6 +148,75 @@ func TestAPIRejectsOversizedManagementBody(t *testing.T) {
 	}
 }
 
+func TestAPIRejectsInvalidExpireInHeader(t *testing.T) {
+	handler := testHandler(t)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/testdb/users", bytes.NewReader([]byte(`{"ok":true}`)))
+	request.Header.Set("Authorization", "Bearer test_admin_key")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Expire-In", "-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d body=%s", response.Code, http.StatusBadRequest, response.Body.String())
+	}
+}
+
+func TestMetricsRequiresAdminScope(t *testing.T) {
+	db, err := store.New(t.TempDir(), 8, nil)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer db.Close()
+
+	adminKey := "test_admin_key"
+	authenticator := auth.New(adminKey, []byte("test_secret"))
+	readOnlyToken, err := authenticator.GenerateKey(auth.ScopeReadOnly, "*", "*")
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	handler := NewHandler(db, authenticator, Options{MaxBodyBytes: 1024})
+
+	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	request.Header.Set("Authorization", "Bearer "+readOnlyToken)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("read-only metrics status = %d, want %d", response.Code, http.StatusForbidden)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	request.Header.Set("Authorization", "Bearer "+adminKey)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("admin metrics status = %d, want %d body=%s", response.Code, http.StatusOK, response.Body.String())
+	}
+}
+
+func TestOperationalRateLimit(t *testing.T) {
+	db, err := store.New(t.TempDir(), 8, nil)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer db.Close()
+
+	handler := NewHandler(db, auth.New("test_admin_key", []byte("test_secret")), Options{
+		MaxBodyBytes:   1024,
+		AdminRateLimit: 1,
+	})
+
+	response := doJSON(t, handler, http.MethodPost, "/api/v1/databases", `{"name":"one"}`)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("first request status = %d, body=%s", response.Code, response.Body.String())
+	}
+	response = doJSON(t, handler, http.MethodPost, "/api/v1/databases", `{"name":"two"}`)
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("second request status = %d, want %d body=%s", response.Code, http.StatusTooManyRequests, response.Body.String())
+	}
+}
+
 func testHandler(t *testing.T) http.Handler {
 	t.Helper()
 	db, err := store.New(t.TempDir(), 8, nil)

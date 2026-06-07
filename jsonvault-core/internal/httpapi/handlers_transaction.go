@@ -29,6 +29,18 @@ func (s *Server) handleTransaction(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "bad_request", "message": "transaction must contain at least one operation"}})
 		return
 	}
+	if len(req.Operations) > store.MaxTransactionOps {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "bad_request", "message": "transaction has too many operations"}})
+		return
+	}
+	var totalBytes int
+	for _, op := range req.Operations {
+		totalBytes += len(op.Body)
+		if totalBytes > store.MaxTransactionBytes {
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "bad_request", "message": "transaction payload too large"}})
+			return
+		}
+	}
 
 	// For security, verify the user's JWT has access to every single collection they are trying to modify.
 	for _, op := range req.Operations {
@@ -41,7 +53,7 @@ func (s *Server) handleTransaction(c *gin.Context) {
 		if !hasAccess {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"error": gin.H{
-					"code": "forbidden",
+					"code":    "forbidden",
 					"message": "insufficient permissions for collection: " + op.Collection,
 				},
 			})

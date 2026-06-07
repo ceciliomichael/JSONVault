@@ -22,7 +22,7 @@ func (s *Server) handleCollections(c *gin.Context) {
 		}
 		c.JSON(http.StatusOK, collections)
 	case http.MethodPost:
-		if !s.hasScope(c, auth.ScopeReadWrite) {
+		if !s.hasScope(c, auth.ScopeAdmin) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			return
 		}

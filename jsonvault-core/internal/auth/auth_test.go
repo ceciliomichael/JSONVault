@@ -1,7 +1,11 @@
 package auth
 
 import (
+	"errors"
 	"testing"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func TestAuthenticator(t *testing.T) {
@@ -39,5 +43,122 @@ func TestAuthenticator(t *testing.T) {
 	}
 	if coll != "mycoll" {
 		t.Errorf("expected coll mycoll, got %s", coll)
+	}
+}
+
+func TestGeneratedKeyIncludesLifecycleClaimsAndCanBeRevoked(t *testing.T) {
+	a := New("admin", []byte("secret_signing_key"))
+
+	key, err := a.GenerateKeyWithMetadata(ScopeReadOnly, "mydb", "mycoll")
+	if err != nil {
+		t.Fatalf("GenerateKeyWithMetadata: %v", err)
+	}
+	if key.ID == "" {
+		t.Fatal("expected token id")
+	}
+	if time.Until(key.ExpiresAt) < 89*24*time.Hour {
+		t.Fatalf("unexpected expiry: %v", key.ExpiresAt)
+	}
+
+	ok, _, _, _ := a.Authenticate("Bearer " + key.Token)
+	if !ok {
+		t.Fatal("generated token should authenticate before revocation")
+	}
+
+	a.RevokeTokenID(key.ID)
+	ok, _, _, _ = a.Authenticate("Bearer " + key.Token)
+	if ok {
+		t.Fatal("revoked token should not authenticate")
+	}
+}
+
+func TestRevocationFilePersistsRevokedTokenIDs(t *testing.T) {
+	path := t.TempDir() + "/revoked.json"
+	secret := []byte("secret_signing_key")
+
+	a, err := NewWithRevocationFile("admin", secret, path)
+	if err != nil {
+		t.Fatalf("NewWithRevocationFile: %v", err)
+	}
+	key, err := a.GenerateKeyWithMetadata(ScopeReadOnly, "mydb", "mycoll")
+	if err != nil {
+		t.Fatalf("GenerateKeyWithMetadata: %v", err)
+	}
+	if err := a.RevokeTokenID(key.ID); err != nil {
+		t.Fatalf("RevokeTokenID: %v", err)
+	}
+
+	restarted, err := NewWithRevocationFile("admin", secret, path)
+	if err != nil {
+		t.Fatalf("NewWithRevocationFile restarted: %v", err)
+	}
+	ok, _, _, _ := restarted.Authenticate("Bearer " + key.Token)
+	if ok {
+		t.Fatal("revoked token should stay revoked after reload")
+	}
+}
+
+func TestExpiredJWTDoesNotAuthenticate(t *testing.T) {
+	secret := []byte("secret_signing_key")
+	a := New("admin", secret)
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"scope":      string(ScopeReadOnly),
+		"database":   "mydb",
+		"collection": "mycoll",
+		"iat":        time.Now().Add(-2 * time.Hour).Unix(),
+		"nbf":        time.Now().Add(-2 * time.Hour).Unix(),
+		"exp":        time.Now().Add(-1 * time.Hour).Unix(),
+		"jti":        "expired-token",
+	})
+	tokenString, err := token.SignedString(secret)
+	if err != nil {
+		t.Fatalf("SignedString: %v", err)
+	}
+
+	ok, _, _, _ := a.Authenticate("Bearer " + tokenString)
+	if ok {
+		t.Fatal("expired token should not authenticate")
+	}
+}
+
+func TestJWTWithoutTokenIDDoesNotAuthenticate(t *testing.T) {
+	secret := []byte("secret_signing_key")
+	a := New("admin", secret)
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"scope":      string(ScopeReadOnly),
+		"database":   "mydb",
+		"collection": "mycoll",
+		"exp":        time.Now().Add(time.Hour).Unix(),
+	})
+	tokenString, err := token.SignedString(secret)
+	if err != nil {
+		t.Fatalf("SignedString: %v", err)
+	}
+
+	ok, _, _, _ := a.Authenticate("Bearer " + tokenString)
+	if ok {
+		t.Fatal("token without jti should not authenticate")
+	}
+}
+
+func TestRejectsUnexpectedSigningMethod(t *testing.T) {
+	a := New("admin", []byte("secret_signing_key"))
+	token := jwt.NewWithClaims(jwt.SigningMethodNone, jwt.MapClaims{
+		"scope":      string(ScopeReadOnly),
+		"database":   "mydb",
+		"collection": "mycoll",
+		"exp":        time.Now().Add(time.Hour).Unix(),
+		"jti":        "none-token",
+	})
+	tokenString, err := token.SignedString(jwt.UnsafeAllowNoneSignatureType)
+	if err != nil && !errors.Is(err, jwt.ErrTokenUnverifiable) {
+		t.Fatalf("SignedString: %v", err)
+	}
+
+	ok, _, _, _ := a.Authenticate("Bearer " + tokenString)
+	if ok {
+		t.Fatal("none-signed token should not authenticate")
 	}
 }

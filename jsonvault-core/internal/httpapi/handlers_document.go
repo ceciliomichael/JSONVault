@@ -14,6 +14,8 @@ import (
 	"jsonvault/internal/store"
 )
 
+const maxExpireIn = 365 * 24 * time.Hour
+
 func (s *Server) handleCollectionDocuments(c *gin.Context) {
 	database := c.Param("database")
 	collection := c.Param("collection")
@@ -90,8 +92,11 @@ func (s *Server) handleCollectionDocuments(c *gin.Context) {
 		if !ok {
 			return
 		}
-		
-		expireIn := parseExpireIn(c)
+
+		expireIn, ok := parseExpireIn(c)
+		if !ok {
+			return
+		}
 		document, err := s.store.CreateDocumentWithTTL(database, collection, body, expireIn)
 		if err != nil {
 			s.handleStoreError(c, err)
@@ -131,8 +136,11 @@ func (s *Server) handleDocumentByID(c *gin.Context) {
 		if !ok {
 			return
 		}
-		
-		expireIn := parseExpireIn(c)
+
+		expireIn, ok := parseExpireIn(c)
+		if !ok {
+			return
+		}
 		document, err := s.store.PutDocumentWithTTL(database, collection, id, body, c.GetHeader("If-Match"), expireIn)
 		if err != nil {
 			if errors.Is(err, store.ErrPreconditionFailed) {
@@ -209,14 +217,15 @@ func (s *Server) readDocumentBodyGin(c *gin.Context) ([]byte, bool) {
 	return data, true
 }
 
-func parseExpireIn(c *gin.Context) time.Duration {
+func parseExpireIn(c *gin.Context) (time.Duration, bool) {
 	expireStr := c.GetHeader("X-Expire-In")
 	if expireStr == "" {
-		return 0
+		return 0, true
 	}
 	expireInt, err := strconv.ParseInt(expireStr, 10, 64)
-	if err != nil {
-		return 0
+	if err != nil || expireInt <= 0 || expireInt > int64(maxExpireIn/time.Second) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "bad_request", "message": "X-Expire-In must be a positive number of seconds no greater than 31536000"}})
+		return 0, false
 	}
-	return time.Duration(expireInt) * time.Second
+	return time.Duration(expireInt) * time.Second, true
 }

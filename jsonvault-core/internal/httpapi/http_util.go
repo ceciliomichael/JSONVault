@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -46,6 +47,13 @@ func (s *Server) handleStoreError(c *gin.Context, err error) {
 	case errors.Is(err, store.ErrPreconditionFailed):
 		c.JSON(http.StatusPreconditionFailed, gin.H{"error": gin.H{"code": "precondition_failed", "message": err.Error()}})
 	default:
+		slog.Error("store request failed",
+			"method", c.Request.Method,
+			"path", c.FullPath(),
+			"database", c.Param("database"),
+			"collection", c.Param("collection"),
+			"error", err,
+		)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "internal_error", "message": "internal server error"}})
 	}
 }

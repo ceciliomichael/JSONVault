@@ -30,7 +30,7 @@ When you read a document, you get an `ETag`. When you update that document, you 
 
 ## 🔐 2. Authentication & API Keys
 
-JSONVault uses **Stateless JSON Web Tokens (JWT)** for scoped access. 
+JSONVault uses **scoped JSON Web Tokens (JWTs)** for access.
 
 You should receive an API Key (JWT) from your Dashboard Provider.
 
@@ -45,6 +45,8 @@ Content-Type: application/json
 
 If you receive a `403 Forbidden` error or a `401 Unauthorized` error, your JWT Token does not have the required permissions for that specific database/collection.
 
+Normal `read_write` keys are limited to document CRUD, transactions, and transient publish within their JWT database/collection constraints. Schema, index, FTS, webhook, database, collection, key, and backup management require an admin key.
+
 ---
 
 ## 📡 3. The API Reference
@@ -57,19 +59,19 @@ Open a persistent HTTP connection to receive live document mutations.
 - **Response:** Infinite stream of `text/event-stream`
 - **Event Format:**
   ```text
-  data: {"action":"insert","database":"{db}","collection":"{coll}","document_id":"<id>","etag":"<new_etag>","document":{...}}
+  data: {"sequence":1,"action":"insert","database":"{db}","collection":"{coll}","document_id":"<id>","etag":"<new_etag>","document":{...}}
   
-  data: {"action":"update","database":"{db}","collection":"{coll}","document_id":"<id>","etag":"<new_etag>","document":{...}}
+  data: {"sequence":2,"action":"update","database":"{db}","collection":"{coll}","document_id":"<id>","etag":"<new_etag>","document":{...}}
   
-  data: {"action":"delete","database":"{db}","collection":"{coll}","document_id":"<id>"}
+  data: {"sequence":3,"action":"delete","database":"{db}","collection":"{coll}","document_id":"<id>"}
   ```
-*(Note: To prevent proxies from dropping idle connections, JSONVault sends a silent `: keepalive` comment every 15 seconds. Standard EventSource clients handle this automatically).*
+*(Note: To prevent proxies from dropping idle connections, JSONVault sends a silent `: keepalive` comment every 15 seconds. Standard EventSource clients handle this automatically. If a subscriber falls behind, JSONVault closes the stream; clients should reconnect and resync when that happens.)*
 
 #### Publish Transient Message (Pub/Sub)
 Instantly broadcast a JSON message to all active SSE subscribers without saving it to the database disk. Perfect for ephemeral events like "User is typing...".
 - **Request:** `POST /api/v1/{database}/{collection}/publish`
 - **Body:** Any valid JSON object (Max 100KB).
-- **Response (202 Accepted):** `{"status": "published"}`
+- **Response (202 Accepted):** `{"published": true, "database": "...", "collection": "..."}`
 
 #### Real-Time Presence
 Get the exact number of active SSE connections currently subscribed to a collection. Perfect for showing "Online Users".
@@ -96,6 +98,7 @@ Retrieve a paginated list of documents, optionally filtered and sorted directly 
 - **Headers:** `X-Expire-In: <seconds>` (Optional: Automatically delete document after X seconds)
 - **Body:** Any valid JSON object.
 - **Response (201 Created):** Returns the auto-generated `id` and the generated `ETag` header.
+*(Note: `X-Expire-In` must be a positive integer number of seconds no greater than 31536000.)*
 
 #### Get Document by ID
 - **Request:** `GET /api/v1/{database}/{collection}/{id}`
@@ -109,6 +112,7 @@ Completely overwrites the document if it exists, or creates a new document using
   - `X-Expire-In: <seconds>` (Optional: Automatically delete document after X seconds)
 - **Body:** The full new JSON object.
 - **Response (200 OK):** Returns the upserted document and its `ETag` header.
+*(Note: `PUT` without `X-Expire-In` clears an existing TTL for that document. `PATCH` preserves the existing TTL.)*
 
 #### Partial Update Document (Merge)
 Updates specific fields while preserving the rest (e.g. only updating `status: "completed"`).
@@ -128,6 +132,7 @@ JSONVault is schemaless by default! However, if you want to strictly enforce dat
 
 #### Set or Update a Schema
 - **Request:** `PUT /api/v1/{database}/{collection}/schema`
+- **Authorization:** Admin key required.
 - **Body:** Your valid JSON Schema object.
 - **Response (200 OK):** `{"updated": true}`
 *(Note: Once a schema is set, any `POST`/`PUT`/`PATCH` that violates the schema will be immediately rejected with a `400 Bad Request`).*
@@ -138,6 +143,7 @@ JSONVault is schemaless by default! However, if you want to strictly enforce dat
 
 #### Delete Schema
 - **Request:** `DELETE /api/v1/{database}/{collection}/schema`
+- **Authorization:** Admin key required.
 - **Response (200 OK):** `{"deleted": true}`
 
 ---
@@ -148,9 +154,10 @@ By default, queries using `?filter[...]` perform a full collection scan. For mas
 
 #### Create an Index
 - **Request:** `POST /api/v1/{database}/{collection}/indexes`
+- **Authorization:** Admin key required.
 - **Body:** `{"field": "email"}`
-- **Response (201 Created):** `{"created": true}`
-*(Note: Creating an index automatically backfills all existing documents. The specified field will now use the B-Tree fast path during `GET` queries).*
+- **Response (201 Created):** `{"indexed": true, "field": "email"}`
+*(Note: Creating an index automatically backfills all existing documents. Queries use the B-Tree fast path only after the build is complete and promoted.)*
 
 #### List Indexes
 - **Request:** `GET /api/v1/{database}/{collection}/indexes`
@@ -158,6 +165,7 @@ By default, queries using `?filter[...]` perform a full collection scan. For mas
 
 #### Delete an Index
 - **Request:** `DELETE /api/v1/{database}/{collection}/indexes/{field}`
+- **Authorization:** Admin key required.
 - **Response (200 OK):** `{"deleted": true}`
 
 ---
@@ -172,10 +180,12 @@ First, define which fields in your collection should be indexed for Full-Text Se
 
 ```bash
 curl -X POST "http://localhost:8080/api/v1/store/users/fts" \
-  -H "Authorization: Bearer <your_jwt_token>" \
+  -H "Authorization: Bearer <your_admin_key>" \
   -H "Content-Type: application/json" \
   -d '{"fields": ["name", "bio"]}'
 ```
+
+Configuring FTS requires an admin key and rebuilds the collection FTS index from existing documents.
 
 #### 2. Querying
 
@@ -199,6 +209,7 @@ curl "http://localhost:8080/api/v1/store/users?search=engineer&filter[status]=%2
 JSONVault supports ACID-compliant atomic transactions, allowing you to update multiple documents at exactly the same time. If any single operation fails (e.g. invalid JSON, missing ETag), the entire transaction rolls back.
 
 - **Request:** `POST /api/v1/{database}/transactions`
+- **Limits:** Maximum 100 operations and 4MB cumulative operation body bytes.
 - **Body:**
   ```json
   {
@@ -216,10 +227,11 @@ JSONVault supports ACID-compliant atomic transactions, allowing you to update mu
 ### Outbound Webhooks
 
 JSONVault can automatically send an HTTP POST request to your backend whenever data changes. This is extremely useful for event-driven architectures.
-*Note: JSONVault features strict SSRF protection and will block webhooks to internal or private IP addresses.*
+*Note: JSONVault features strict SSRF protection and will block webhooks to internal or private IP addresses. Redirects are disabled, and deliveries are processed through bounded workers with per-target limits.*
 
 #### Register Webhooks
 - **Request:** `PUT /api/v1/{database}/{collection}/webhooks`
+- **Authorization:** Admin key required.
 - **Body:**
   ```json
   {
@@ -232,7 +244,14 @@ JSONVault can automatically send an HTTP POST request to your backend whenever d
 
 #### Webhook Delivery
 When an event occurs, JSONVault will send a `POST` request to your URL containing the JSON payload.
-The request will include an `X-JSONVault-Signature` header. This is an HMAC SHA-256 hash of the payload using your `webhook_secret`. You MUST compute the hash on your backend and compare it to this header to ensure the webhook legitimately came from JSONVault.
+The request will include these headers:
+
+- `X-JSONVault-Signature`: Legacy HMAC SHA-256 hash of the payload using your `webhook_secret`.
+- `X-JSONVault-Timestamp`: Unix timestamp for replay-window checks.
+- `X-JSONVault-Event-ID`: Monotonic JSONVault event sequence ID.
+- `X-JSONVault-Signature-V2`: HMAC SHA-256 of `timestamp + "." + event_id + "." + payload` using your `webhook_secret`.
+
+Receivers should verify `X-JSONVault-Signature-V2`, reject old timestamps, and deduplicate recent event IDs.
 
 ---
 
@@ -243,11 +262,13 @@ The request will include an `X-JSONVault-Signature` header. This is an HMAC SHA-
 
 #### List / Delete Databases
 - **List:** `GET /api/v1/databases`
+- **Create:** `POST /api/v1/databases` *(Requires Admin API Key)*
 - **Delete:** `DELETE /api/v1/{database}` *(Requires Admin API Key)*
 
-#### List / Delete Collections
+#### List / Create / Delete Collections
 - **List:** `GET /api/v1/{database}/collections`
-- **Delete:** `DELETE /api/v1/{database}/collections/{collection}`
+- **Create:** `POST /api/v1/{database}/collections` *(Requires Admin API Key)*
+- **Delete:** `DELETE /api/v1/{database}/collections/{collection}` *(Requires Admin API Key)*
 
 ---
 
@@ -266,5 +287,6 @@ All errors follow a standard, predictable JSON format:
 - `400 Bad Request`: Invalid JSON, too many filters, or offset too large.
 - `401 Unauthorized`: Missing or invalid Bearer token.
 - `403 Forbidden`: API Key lacks required permissions.
+- `429 Too Many Requests`: Operational/admin rate limit exceeded.
 - `412 Precondition Failed`: The ETag you provided does not match the server's current version (Someone else edited it!).
 - `413 Payload Too Large`: Request body exceeds the 10MB limit.

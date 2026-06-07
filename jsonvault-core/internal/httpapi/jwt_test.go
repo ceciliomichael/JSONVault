@@ -48,7 +48,7 @@ func TestJWTAuthentication(t *testing.T) {
 	req3.Header.Set("Authorization", "Bearer "+adminKey)
 	req3.Header.Set("Content-Type", "application/json")
 	resp3, _ := http.DefaultClient.Do(req3)
-	
+
 	if resp3.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201 when creating key, got %d", resp3.StatusCode)
 	}
@@ -58,12 +58,19 @@ func TestJWTAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	
+
 	tokenVal, ok := keyData["token"]
 	if !ok || tokenVal == nil {
 		t.Fatalf("token is missing from response: %v", keyData)
 	}
 	token := tokenVal.(string)
+	jti, ok := keyData["jti"].(string)
+	if !ok || jti == "" {
+		t.Fatalf("jti is missing from response: %v", keyData)
+	}
+	if _, ok := keyData["expires_at"].(string); !ok {
+		t.Fatalf("expires_at is missing from response: %v", keyData)
+	}
 
 	// 4. Try to insert into "mydb/users" with the JWT (should succeed)
 	insertReq := `{"hello":"world"}`
@@ -90,5 +97,42 @@ func TestJWTAuthentication(t *testing.T) {
 	resp6, _ := http.DefaultClient.Do(req6)
 	if resp6.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected 403 when accessing admin route with read_write JWT, got %d", resp6.StatusCode)
+	}
+
+	structuralRequests := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPost, "/api/v1/databases", `{"name":"otherdb"}`},
+		{http.MethodPost, "/api/v1/mydb/collections", `{"name":"other"}`},
+		{http.MethodPost, "/api/v1/mydb/users/indexes", `{"field":"hello"}`},
+		{http.MethodPost, "/api/v1/mydb/users/fts", `{"fields":["hello"]}`},
+		{http.MethodPut, "/api/v1/mydb/users/schema", `{"type":"object"}`},
+		{http.MethodPut, "/api/v1/mydb/users/webhooks", `{"webhooks":[]}`},
+	}
+	for _, tc := range structuralRequests {
+		req, _ := http.NewRequest(tc.method, server.URL+tc.path, bytes.NewReader([]byte(tc.body)))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := http.DefaultClient.Do(req)
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("%s %s: expected 403 for read_write JWT, got %d", tc.method, tc.path, resp.StatusCode)
+		}
+	}
+
+	revokeReq, _ := http.NewRequest(http.MethodDelete, server.URL+"/api/v1/admin/keys/"+jti, nil)
+	revokeReq.Header.Set("Authorization", "Bearer "+adminKey)
+	revokeResp, _ := http.DefaultClient.Do(revokeReq)
+	if revokeResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 when revoking key, got %d", revokeResp.StatusCode)
+	}
+
+	req7, _ := http.NewRequest("POST", server.URL+"/api/v1/mydb/users", bytes.NewReader([]byte(insertReq)))
+	req7.Header.Set("Authorization", "Bearer "+token)
+	req7.Header.Set("Content-Type", "application/json")
+	resp7, _ := http.DefaultClient.Do(req7)
+	if resp7.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for revoked JWT, got %d", resp7.StatusCode)
 	}
 }

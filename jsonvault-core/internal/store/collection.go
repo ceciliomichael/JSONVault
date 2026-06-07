@@ -23,6 +23,9 @@ func (s *Store) CreateCollection(database, collection string) (bool, error) {
 		return false, err
 	}
 
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	var created bool
 	err = db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(collection))
@@ -103,13 +106,16 @@ func (s *Store) DeleteCollection(database, collection string) error {
 		return err
 	}
 
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	err = db.Update(func(tx *bolt.Tx) error {
 		if tx.Bucket([]byte(collection)) == nil {
 			return ErrNotFound
 		}
 
 		// Clean up index buckets
-		indexes := getIndexedFieldsTx(tx, collection)
+		indexes := getWritableIndexFieldsTx(tx, collection)
 		for _, field := range indexes {
 			idxBucketName := getIndexBucketName(collection, field)
 			if tx.Bucket(idxBucketName) != nil {
@@ -126,7 +132,22 @@ func (s *Store) DeleteCollection(database, collection string) error {
 				return err
 			}
 		}
+		if err := deleteIndexBuildMetadataForCollectionTx(tx, collection); err != nil {
+			return err
+		}
 
+		if err := deleteSchemaTx(tx, collection); err != nil {
+			return err
+		}
+		if err := deleteWebhooksTx(tx, collection); err != nil {
+			return err
+		}
+		if err := deleteFTSForCollectionTx(tx, collection); err != nil {
+			return err
+		}
+		if err := deleteTTLForCollectionTx(tx, collection); err != nil {
+			return err
+		}
 		if err := deleteCollectionCountTx(tx, collection); err != nil {
 			return err
 		}
@@ -140,5 +161,6 @@ func (s *Store) DeleteCollection(database, collection string) error {
 		}
 		return fmt.Errorf("delete collection: %w", err)
 	}
+	s.invalidateSchemaCache(database, collection)
 	return nil
 }

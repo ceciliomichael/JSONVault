@@ -7,7 +7,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"jsonvault/internal/auth"
 	"jsonvault/internal/store"
 	"time"
@@ -42,13 +41,14 @@ type Store interface {
 	DeleteDocument(database, collection, id string, expectedETag string) error
 
 	ExecuteTransaction(database string, ops []store.TransactionOp) ([]store.Document, error)
+	Stats() store.Stats
 
 	ListIndexes(database, collection string) ([]string, error)
 	CreateIndex(ctx context.Context, database, collection, field string) error
 	DeleteIndex(database, collection, field string) error
 
 	BackupDatabase(ctx context.Context, database string, w io.Writer) error
-	
+
 	Subscribe(database, collection string) *store.Subscription
 	Unsubscribe(sub *store.Subscription)
 	PublishEvent(event store.Event)
@@ -56,13 +56,15 @@ type Store interface {
 }
 
 type Options struct {
-	MaxBodyBytes int64
+	MaxBodyBytes   int64
+	AdminRateLimit int
 }
 
 type Server struct {
 	store         Store
 	authenticator *auth.Authenticator
 	maxBodyBytes  int64
+	rateLimiter   *rateLimiter
 }
 
 func NewHandler(db Store, authenticator *auth.Authenticator, options Options) http.Handler {
@@ -70,11 +72,16 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 	if maxBodyBytes < 1 {
 		maxBodyBytes = defaultMaxBodyBytes
 	}
+	adminRateLimit := options.AdminRateLimit
+	if adminRateLimit < 1 {
+		adminRateLimit = 120
+	}
 
 	server := &Server{
 		store:         db,
 		authenticator: authenticator,
 		maxBodyBytes:  maxBodyBytes,
+		rateLimiter:   newRateLimiter(adminRateLimit, time.Minute),
 	}
 
 	gin.SetMode(gin.ReleaseMode)
@@ -119,42 +126,43 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 		c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+	r.GET("/metrics", server.handleMetrics)
 
 	v1 := r.Group("/api/v1")
 	{
 		v1.GET("/admin/keys", func(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusMethodNotAllowed, gin.H{"error": "use POST to generate keys"})
 		})
-		v1.POST("/admin/keys", server.handleCreateKey)
+		v1.POST("/admin/keys", server.rateLimitOperational(), server.handleCreateKey)
+		v1.DELETE("/admin/keys/:jti", server.rateLimitOperational(), server.handleRevokeKey)
 
-		v1.GET("/admin/backup/:database", server.handleBackupDatabase)
+		v1.GET("/admin/backup/:database", server.rateLimitOperational(), server.handleBackupDatabase)
 
 		v1.GET("/databases", server.handleDatabases)
-		v1.POST("/databases", server.handleDatabases)
-		v1.DELETE("/:database", server.handleDeleteDatabase)
+		v1.POST("/databases", server.rateLimitOperational(), server.handleDatabases)
+		v1.DELETE("/:database", server.rateLimitOperational(), server.handleDeleteDatabase)
 
 		v1.GET("/:database/collections", server.handleCollections)
-		v1.POST("/:database/collections", server.handleCollections)
-		v1.DELETE("/:database/collections/:collection", server.handleDeleteCollection)
+		v1.POST("/:database/collections", server.rateLimitOperational(), server.handleCollections)
+		v1.DELETE("/:database/collections/:collection", server.rateLimitOperational(), server.handleDeleteCollection)
 
-		v1.POST("/:database/transactions", server.handleTransaction)
+		v1.POST("/:database/transactions", server.rateLimitOperational(), server.handleTransaction)
 
 		v1.GET("/:database/:collection", server.handleCollectionDocuments)
 		v1.POST("/:database/:collection", server.handleCollectionDocuments)
 
 		v1.GET("/:database/:collection/indexes", server.handleListIndexes)
-		v1.POST("/:database/:collection/indexes", server.handleCreateIndex)
-		v1.DELETE("/:database/:collection/indexes/:field", server.handleDeleteIndex)
+		v1.POST("/:database/:collection/indexes", server.rateLimitOperational(), server.handleCreateIndex)
+		v1.DELETE("/:database/:collection/indexes/:field", server.rateLimitOperational(), server.handleDeleteIndex)
 
-		v1.POST("/:database/:collection/fts", server.handleSetFTSConfig)
+		v1.POST("/:database/:collection/fts", server.rateLimitOperational(), server.handleSetFTSConfig)
 
 		v1.GET("/:database/:collection/schema", server.handleGetSchema)
-		v1.PUT("/:database/:collection/schema", server.handleSetSchema)
-		v1.DELETE("/:database/:collection/schema", server.handleSetSchema)
+		v1.PUT("/:database/:collection/schema", server.rateLimitOperational(), server.handleSetSchema)
+		v1.DELETE("/:database/:collection/schema", server.rateLimitOperational(), server.handleSetSchema)
 
 		v1.GET("/:database/:collection/webhooks", server.handleGetWebhooks)
-		v1.PUT("/:database/:collection/webhooks", server.handleSetWebhooks)
+		v1.PUT("/:database/:collection/webhooks", server.rateLimitOperational(), server.handleSetWebhooks)
 
 		v1.GET("/:database/:collection/subscribe", server.handleSubscribe)
 		v1.POST("/:database/:collection/publish", server.handlePublish)
@@ -205,6 +213,7 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 			c.AbortWithStatusJSON(http.StatusMethodNotAllowed, gin.H{"error": "use POST to generate keys"})
 		})
 		v1.POST("/admin/keys", server.handleCreateKey)
+		v1.DELETE("/admin/keys/:jti", server.handleRevokeKey)
 
 		v1.GET("/databases", server.handleDatabases)
 		v1.POST("/databases", server.handleDatabases)
@@ -319,7 +328,7 @@ func (s *Server) handleDeleteDatabase(c *gin.Context) {
 }
 
 func (s *Server) handleDeleteCollection(c *gin.Context) {
-	if !s.hasScope(c, auth.ScopeReadWrite) {
+	if !s.hasScope(c, auth.ScopeAdmin) {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
@@ -343,8 +352,10 @@ func (s *Server) handleBackupDatabase(c *gin.Context) {
 	c.Header("Content-Disposition", `attachment; filename="`+database+`.db"`)
 
 	if err := s.store.BackupDatabase(c.Request.Context(), database, c.Writer); err != nil {
-		// Cannot send JSON error if we already started writing headers/body
-		// We can just log or abort
+		if !c.Writer.Written() {
+			s.handleStoreError(c, err)
+			return
+		}
 		c.AbortWithError(http.StatusInternalServerError, err)
 	}
 }

@@ -11,9 +11,14 @@ var configEnvNames = []string{
 	"JSONVAULT_ENV_FILE",
 	"JSONVAULT_API_KEY",
 	"JSONVAULT_API_KEYS",
+	"JSONVAULT_ADMIN_KEY",
+	"JSONVAULT_ADMIN_RATE_LIMIT_PER_MINUTE",
 	"JSONVAULT_ADDR",
 	"JSONVAULT_BASE_URL",
 	"JSONVAULT_DATA_DIR",
+	"JSONVAULT_ENCRYPTION_KEY",
+	"JSONVAULT_ENCRYPTION_REQUIRED",
+	"JSONVAULT_JWT_SECRET",
 	"JSONVAULT_CACHE_ENTRIES",
 	"JSONVAULT_MAX_BODY_BYTES",
 	"JSONVAULT_READ_HEADER_TIMEOUT",
@@ -64,13 +69,57 @@ func TestLoadRequiresAPIKey(t *testing.T) {
 func TestLoadRejectsInvalidCacheEntries(t *testing.T) {
 	clearConfigEnv(t)
 	t.Setenv("JSONVAULT_ENV_FILE", filepath.Join(t.TempDir(), "missing.env"))
-	os.Setenv("JSONVAULT_ADMIN_KEY", "admin_secret")
-	os.Setenv("JSONVAULT_JWT_SECRET", "jwt_secret")
+	t.Setenv("JSONVAULT_ADMIN_KEY", "admin_secret")
+	t.Setenv("JSONVAULT_JWT_SECRET", "jwt_secret")
 	t.Setenv("JSONVAULT_CACHE_ENTRIES", "0")
 
 	_, err := Load()
 	if err == nil {
 		t.Fatal("expected invalid cache entry error")
+	}
+}
+
+func TestLoadRejectsInvalidAdminRateLimit(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("JSONVAULT_ENV_FILE", filepath.Join(t.TempDir(), "missing.env"))
+	t.Setenv("JSONVAULT_ADMIN_KEY", "admin_secret")
+	t.Setenv("JSONVAULT_JWT_SECRET", "jwt_secret")
+	t.Setenv("JSONVAULT_ADMIN_RATE_LIMIT_PER_MINUTE", "0")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected invalid admin rate limit error")
+	}
+}
+
+func TestLoadRejectsEncryptionRequiredWithoutKey(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("JSONVAULT_ENV_FILE", filepath.Join(t.TempDir(), "missing.env"))
+	t.Setenv("JSONVAULT_ADMIN_KEY", "admin_secret")
+	t.Setenv("JSONVAULT_JWT_SECRET", "jwt_secret")
+	t.Setenv("JSONVAULT_ENCRYPTION_REQUIRED", "true")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected encryption required key error")
+	}
+}
+
+func TestLoadAcceptsEncryptionRequiredWithValidKey(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("JSONVAULT_ENV_FILE", filepath.Join(t.TempDir(), "missing.env"))
+	t.Setenv("JSONVAULT_ADMIN_KEY", "admin_secret")
+	t.Setenv("JSONVAULT_JWT_SECRET", "jwt_secret")
+	t.Setenv("JSONVAULT_ENCRYPTION_REQUIRED", "true")
+	t.Setenv("JSONVAULT_ENCRYPTION_KEY", "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.EncryptionRequired {
+		t.Fatal("EncryptionRequired = false, want true")
+	}
+	if len(cfg.EncryptionKey) != 32 {
+		t.Fatalf("EncryptionKey length = %d, want 32", len(cfg.EncryptionKey))
 	}
 }
 

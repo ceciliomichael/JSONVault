@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	bolt "go.etcd.io/bbolt"
 )
 
 func TestStoreDocumentCRUDPersistsJSON(t *testing.T) {
@@ -131,6 +133,19 @@ func TestStoreRejectsInvalidNamesAndJSON(t *testing.T) {
 	}
 }
 
+func TestMatchETagsRejectsMalformedWrappers(t *testing.T) {
+	computed := `"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`
+	if !matchETags(computed, `W/"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"`) {
+		t.Fatal("expected weak quoted etag to match")
+	}
+	if !matchETags(computed, `bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`) {
+		t.Fatal("expected comma-list etag to match")
+	}
+	if matchETags(computed, `prefix-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-suffix`) {
+		t.Fatal("malformed wrapper should not match")
+	}
+}
+
 func TestFailedUpdateLeavesOriginalFile(t *testing.T) {
 	root := t.TempDir()
 	db, err := New(root, 8, nil)
@@ -223,7 +238,7 @@ func TestStoreLongOperationsRespectCanceledContext(t *testing.T) {
 		t.Fatalf("BackupDatabase error = %v, want context.Canceled", err)
 	}
 
-	// Give async webhooks triggered by CreateDocument time to complete 
+	// Give async webhooks triggered by CreateDocument time to complete
 	// before the test cleans up the TempDir, avoiding bbolt file-lock panics on Windows.
 	time.Sleep(50 * time.Millisecond)
 }
@@ -268,7 +283,158 @@ func TestStoreEvictsDatabaseHandlesSynchronously(t *testing.T) {
 		t.Fatalf("reopen evicted db1: %v", err)
 	}
 
-	// Give async webhooks triggered by CreateDocument time to complete 
+	// Give async webhooks triggered by CreateDocument time to complete
 	// before the test cleans up the TempDir, avoiding bbolt file-lock panics on Windows.
 	time.Sleep(50 * time.Millisecond)
+}
+
+func TestLRUEvictionDoesNotHoldStoreMutexWhileWaitingOnHandle(t *testing.T) {
+	db, err := New(t.TempDir(), 1, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.CreateDocument("db1", "events", []byte(`{"n":1}`)); err != nil {
+		t.Fatalf("CreateDocument db1: %v", err)
+	}
+	h1, err := db.getDB("db1")
+	if err != nil {
+		t.Fatalf("getDB db1: %v", err)
+	}
+
+	readStarted := make(chan struct{})
+	releaseRead := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseHeldRead := func() {
+		releaseOnce.Do(func() {
+			close(releaseRead)
+		})
+	}
+	defer releaseHeldRead()
+	readDone := make(chan error, 1)
+	go func() {
+		readDone <- h1.View(func(_ *bolt.Tx) error {
+			close(readStarted)
+			<-releaseRead
+			return nil
+		})
+	}()
+	<-readStarted
+
+	evictDone := make(chan error, 1)
+	go func() {
+		_, err := db.CreateDocument("db2", "events", []byte(`{"n":2}`))
+		evictDone <- err
+	}()
+
+	deadline := time.After(time.Second)
+	for {
+		db.mu.RLock()
+		_, stillCached := db.dbs["db1"]
+		db.mu.RUnlock()
+		if !stillCached {
+			break
+		}
+		select {
+		case err := <-evictDone:
+			t.Fatalf("expected db2 open to wait on db1 handle, got %v", err)
+		case <-deadline:
+			t.Fatal("db1 was not removed from cache while eviction waited on its handle")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	select {
+	case err := <-evictDone:
+		t.Fatalf("expected db2 open to wait on db1 handle, got %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	openOther := make(chan error, 1)
+	go func() {
+		_, err := db.CreateDocument("db3", "events", []byte(`{"n":3}`))
+		openOther <- err
+	}()
+
+	select {
+	case err := <-openOther:
+		if err != nil {
+			t.Fatalf("CreateDocument db3: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("opening db3 blocked behind db1 eviction")
+	}
+
+	releaseHeldRead()
+	if err := <-readDone; err != nil {
+		t.Fatalf("held read: %v", err)
+	}
+	if err := <-evictDone; err != nil {
+		t.Fatalf("CreateDocument db2 after release: %v", err)
+	}
+}
+
+type blockingBackupWriter struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (w *blockingBackupWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() {
+		close(w.started)
+	})
+	<-w.release
+	return len(p), nil
+}
+
+func TestBackupStreamingDoesNotBlockWrites(t *testing.T) {
+	db, err := New(t.TempDir(), 8, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer db.Close()
+
+	for i := 0; i < 100; i++ {
+		if _, err := db.CreateDocument("testdb", "events", []byte(`{"n":1}`)); err != nil {
+			t.Fatalf("CreateDocument: %v", err)
+		}
+	}
+
+	writer := &blockingBackupWriter{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	backupDone := make(chan error, 1)
+	go func() {
+		backupDone <- db.BackupDatabase(context.Background(), "testdb", writer)
+	}()
+
+	select {
+	case <-writer.started:
+	case <-time.After(time.Second):
+		t.Fatal("backup did not start streaming")
+	}
+
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := db.PutDocument("testdb", "events", "live", []byte(`{"n":2}`), "")
+		writeDone <- err
+	}()
+
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("PutDocument during backup stream: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("write blocked while backup was streaming to a slow client")
+	}
+
+	close(writer.release)
+	if err := <-backupDone; err != nil {
+		t.Fatalf("BackupDatabase: %v", err)
+	}
 }

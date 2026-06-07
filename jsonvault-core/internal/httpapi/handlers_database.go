@@ -21,7 +21,7 @@ func (s *Server) handleDatabases(c *gin.Context) {
 		}
 		c.JSON(http.StatusOK, databases)
 	case http.MethodPost:
-		if !s.hasScope(c, auth.ScopeReadWrite) {
+		if !s.hasScope(c, auth.ScopeAdmin) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			return
 		}

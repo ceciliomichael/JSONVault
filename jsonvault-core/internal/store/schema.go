@@ -1,6 +1,7 @@
 package store
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 
@@ -12,8 +13,29 @@ var ErrSchemaValidation = errors.New("schema validation failed")
 
 const schemaBucketPrefix = "_schemas"
 
+type cachedSchema struct {
+	fingerprint [32]byte
+	schema      *gojsonschema.Schema
+}
+
 func getSchemaBucketName() []byte {
 	return []byte(schemaBucketPrefix)
+}
+
+func getSchemaTx(tx *bolt.Tx, collection string) []byte {
+	schemaBucket := tx.Bucket(getSchemaBucketName())
+	if schemaBucket == nil {
+		return nil
+	}
+	return schemaBucket.Get([]byte(collection))
+}
+
+func deleteSchemaTx(tx *bolt.Tx, collection string) error {
+	schemaBucket := tx.Bucket(getSchemaBucketName())
+	if schemaBucket == nil {
+		return nil
+	}
+	return schemaBucket.Delete([]byte(collection))
 }
 
 // SetSchema saves a JSON schema for a collection.
@@ -30,8 +52,13 @@ func (s *Store) SetSchema(database, collection string, schema []byte) error {
 	if err != nil {
 		return err
 	}
+	if len(schema) > 0 {
+		if _, err := gojsonschema.NewSchema(gojsonschema.NewBytesLoader(schema)); err != nil {
+			return fmt.Errorf("schema validation error: %w", err)
+		}
+	}
 
-	return db.Update(func(tx *bolt.Tx) error {
+	err = db.Update(func(tx *bolt.Tx) error {
 		// Ensure collection exists
 		if tx.Bucket([]byte(collection)) == nil {
 			return ErrNotFound
@@ -48,6 +75,11 @@ func (s *Store) SetSchema(database, collection string, schema []byte) error {
 
 		return schemaBucket.Put([]byte(collection), schema)
 	})
+	if err != nil {
+		return err
+	}
+	s.invalidateSchemaCache(database, collection)
+	return nil
 }
 
 // GetSchema retrieves the JSON schema for a collection.
@@ -93,14 +125,52 @@ func (s *Store) ValidateDocument(database, collection string, doc []byte) error 
 	if err != nil {
 		return err // db might not exist, etc.
 	}
+	return s.validateDocumentWithSchema(database, collection, schemaBytes, doc)
+}
+
+func validateDocumentWithSchema(schemaBytes, doc []byte) error {
 	if schemaBytes == nil {
 		return nil // No schema attached
 	}
 
-	schemaLoader := gojsonschema.NewBytesLoader(schemaBytes)
+	schema, err := gojsonschema.NewSchema(gojsonschema.NewBytesLoader(schemaBytes))
+	if err != nil {
+		return fmt.Errorf("schema validation error: %w", err)
+	}
+	return validateDocumentWithCompiledSchema(schema, doc)
+}
+
+func (s *Store) validateDocumentWithSchema(database, collection string, schemaBytes, doc []byte) error {
+	if schemaBytes == nil {
+		return nil
+	}
+
+	cacheKey := database + "\x00" + collection
+	fingerprint := sha256.Sum256(schemaBytes)
+
+	s.schemaMu.RLock()
+	cached, ok := s.schemaCache[cacheKey]
+	s.schemaMu.RUnlock()
+	if ok && cached.fingerprint == fingerprint {
+		return validateDocumentWithCompiledSchema(cached.schema, doc)
+	}
+
+	schema, err := gojsonschema.NewSchema(gojsonschema.NewBytesLoader(schemaBytes))
+	if err != nil {
+		return fmt.Errorf("schema validation error: %w", err)
+	}
+
+	s.schemaMu.Lock()
+	s.schemaCache[cacheKey] = cachedSchema{fingerprint: fingerprint, schema: schema}
+	s.schemaMu.Unlock()
+
+	return validateDocumentWithCompiledSchema(schema, doc)
+}
+
+func validateDocumentWithCompiledSchema(schema *gojsonschema.Schema, doc []byte) error {
 	documentLoader := gojsonschema.NewBytesLoader(doc)
 
-	result, err := gojsonschema.Validate(schemaLoader, documentLoader)
+	result, err := schema.Validate(documentLoader)
 	if err != nil {
 		return fmt.Errorf("schema validation error: %w", err)
 	}
@@ -114,4 +184,10 @@ func (s *Store) ValidateDocument(database, collection string, doc []byte) error 
 	}
 
 	return nil
+}
+
+func (s *Store) invalidateSchemaCache(database, collection string) {
+	s.schemaMu.Lock()
+	defer s.schemaMu.Unlock()
+	delete(s.schemaCache, database+"\x00"+collection)
 }

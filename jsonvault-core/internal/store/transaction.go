@@ -9,6 +9,11 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+const (
+	MaxTransactionOps   = 100
+	MaxTransactionBytes = 4 * 1024 * 1024
+)
+
 // ExecuteTransaction executes multiple document operations atomically.
 // If any operation fails, the entire transaction is rolled back.
 func (s *Store) ExecuteTransaction(database string, ops []TransactionOp) ([]Document, error) {
@@ -19,11 +24,27 @@ func (s *Store) ExecuteTransaction(database string, ops []TransactionOp) ([]Docu
 	if len(ops) == 0 {
 		return nil, errors.New("transaction must contain at least one operation")
 	}
+	if len(ops) > MaxTransactionOps {
+		return nil, fmt.Errorf("transaction cannot contain more than %d operations", MaxTransactionOps)
+	}
+	var totalBytes int
+	for i, op := range ops {
+		totalBytes += len(op.Body)
+		if totalBytes > MaxTransactionBytes {
+			return nil, fmt.Errorf("transaction payload cannot exceed %d bytes", MaxTransactionBytes)
+		}
+		if op.Action != "put" && op.Action != "patch" && op.Action != "delete" {
+			return nil, fmt.Errorf("op[%d] invalid action '%s'", i, op.Action)
+		}
+	}
 
 	db, err := s.getDB(database)
 	if err != nil {
 		return nil, err
 	}
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 
 	var results []Document
 	var events []Event
@@ -49,7 +70,7 @@ func (s *Store) ExecuteTransaction(database string, ops []TransactionOp) ([]Docu
 				if err != nil {
 					return fmt.Errorf("op[%d] normalize json: %w", i, err)
 				}
-				if err := s.ValidateDocument(database, collection, data); err != nil {
+				if err := s.validateDocumentWithSchema(database, collection, getSchemaTx(tx, collection), data); err != nil {
 					return fmt.Errorf("op[%d] %w", i, err)
 				}
 
@@ -64,7 +85,7 @@ func (s *Store) ExecuteTransaction(database string, ops []TransactionOp) ([]Docu
 						return fmt.Errorf("op[%d] count: %w", i, err)
 					}
 				} else {
-					existingPlaintext, err := decryptDocument(existingData, s.encryptionKey)
+					existingPlaintext, err := decryptDocument(existingData, s.encryptionKey, s.encryptionRequired)
 					if err != nil {
 						return fmt.Errorf("op[%d] decrypt: %w", i, err)
 					}
@@ -83,6 +104,9 @@ func (s *Store) ExecuteTransaction(database string, ops []TransactionOp) ([]Docu
 
 				if err := b.Put([]byte(op.ID), encryptedData); err != nil {
 					return fmt.Errorf("op[%d] put: %w", i, err)
+				}
+				if err := clearDocumentTTL(tx, collection, op.ID); err != nil {
+					return fmt.Errorf("op[%d] ttl: %w", i, err)
 				}
 				if err := indexDocumentTx(tx, collection, op.ID, data); err != nil {
 					return fmt.Errorf("op[%d] index: %w", i, err)
@@ -109,7 +133,7 @@ func (s *Store) ExecuteTransaction(database string, ops []TransactionOp) ([]Docu
 				if existingData == nil {
 					return fmt.Errorf("op[%d] not found", i)
 				}
-				existingPlaintext, err := decryptDocument(existingData, s.encryptionKey)
+				existingPlaintext, err := decryptDocument(existingData, s.encryptionKey, s.encryptionRequired)
 				if err != nil {
 					return fmt.Errorf("op[%d] decrypt: %w", i, err)
 				}
@@ -140,7 +164,7 @@ func (s *Store) ExecuteTransaction(database string, ops []TransactionOp) ([]Docu
 				if err != nil {
 					return fmt.Errorf("op[%d] normalize merged: %w", i, err)
 				}
-				if err := s.ValidateDocument(database, collection, data); err != nil {
+				if err := s.validateDocumentWithSchema(database, collection, getSchemaTx(tx, collection), data); err != nil {
 					return fmt.Errorf("op[%d] %w", i, err)
 				}
 
@@ -176,7 +200,7 @@ func (s *Store) ExecuteTransaction(database string, ops []TransactionOp) ([]Docu
 				if existingData == nil {
 					return fmt.Errorf("op[%d] not found", i)
 				}
-				existingPlaintext, err := decryptDocument(existingData, s.encryptionKey)
+				existingPlaintext, err := decryptDocument(existingData, s.encryptionKey, s.encryptionRequired)
 				if err != nil {
 					return fmt.Errorf("op[%d] decrypt: %w", i, err)
 				}
@@ -186,6 +210,9 @@ func (s *Store) ExecuteTransaction(database string, ops []TransactionOp) ([]Docu
 
 				if err := incrementCollectionCountTx(tx, collection, -1, b); err != nil {
 					return fmt.Errorf("op[%d] count: %w", i, err)
+				}
+				if err := clearDocumentTTL(tx, collection, op.ID); err != nil {
+					return fmt.Errorf("op[%d] ttl: %w", i, err)
 				}
 				if err := b.Delete([]byte(op.ID)); err != nil {
 					return fmt.Errorf("op[%d] delete: %w", i, err)

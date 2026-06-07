@@ -6,10 +6,15 @@ This guide details operational playbooks for running JSONVault in production, in
 JSONVault exposes a Prometheus metrics endpoint to help operators monitor database health.
 
 **Endpoint:** `GET /metrics`
+**Authorization:** Admin key required.
 
 **Exported Metrics:**
 - `jsonvault_http_requests_total` (Counter): Total HTTP requests handled. Labeled by `method`, `path`, and `status`.
 - `jsonvault_http_request_duration_seconds` (Histogram): Request latency. Labeled by `method` and `path`.
+- `jsonvault_store_open_databases` (Gauge): Current open database handles.
+- `jsonvault_store_data_bytes` (Gauge): Total bytes used by database files.
+- `jsonvault_sse_subscribers` (Gauge): Active SSE subscribers.
+- `jsonvault_webhook_queue_depth` (Gauge): Current webhook queue depth.
 - Standard Go process metrics (Memory allocation, GC times, Goroutines).
 
 ### Structured Logging
@@ -18,7 +23,7 @@ Errors occurring within the Store are clearly logged with contextual tags like `
 
 ## Backups & Restores
 
-Because JSONVault uses `bbolt`, we can perform "Hot Backups" without stopping the server. `bbolt`'s MVCC architecture allows a read transaction to stream a perfectly consistent point-in-time snapshot of the database file while concurrent writes continue.
+Because JSONVault uses `bbolt`, we can perform "Hot Backups" without stopping the server. JSONVault first writes a consistent point-in-time snapshot to a temporary local file, closes the bbolt read transaction, and then streams that snapshot to the client. This avoids holding old read transactions open while a client downloads slowly.
 
 ### Triggering a Backup
 You must use an API Key with `admin` scope.
@@ -27,7 +32,7 @@ curl -X GET -H "Authorization: Bearer <your_admin_key>" \
   -o my_database.db \
   http://localhost:8080/api/v1/admin/backup/my_database
 ```
-This streams the raw `.db` file down to the client. 
+This streams the raw `.db` snapshot down to the client.
 
 ### Restoring a Backup
 1. Gracefully shut down the JSONVault server (send `SIGTERM`).

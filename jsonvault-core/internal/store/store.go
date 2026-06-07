@@ -5,17 +5,17 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	stdjson "encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -23,14 +23,25 @@ import (
 )
 
 type Store struct {
-	root          string
-	cacheEntries  int
-	encryptionKey []byte
-	mu            sync.RWMutex
-	dbs           map[string]*DBHandle
+	root               string
+	cacheEntries       int
+	encryptionKey      []byte
+	encryptionRequired bool
+	mu                 sync.RWMutex
+	writeMu            sync.Mutex
+	dbs                map[string]*DBHandle
+	schemaMu           sync.RWMutex
+	schemaCache        map[string]cachedSchema
 
 	subMu       sync.RWMutex
 	subscribers map[string]map[string]map[*Subscription]struct{}
+	eventSeq    atomic.Uint64
+
+	webhookQueue    chan Event
+	webhookLimiter  *webhookTargetLimiter
+	webhookStop     chan struct{}
+	webhookStopOnce sync.Once
+	webhookWG       sync.WaitGroup
 }
 
 type Document struct {
@@ -47,29 +58,72 @@ type TransactionOp struct {
 	ExpectedETag string             `json:"expected_etag,omitempty"`
 }
 
+type Options struct {
+	EncryptionRequired bool
+}
+
+type Stats struct {
+	OpenDatabases     int
+	DataBytes         int64
+	Subscribers       int
+	WebhookQueueDepth int
+}
+
 func computeETag(data []byte) string {
 	hash := sha256.Sum256(data)
 	return fmt.Sprintf(`"%x"`, hash)
 }
 
-var etagRegex = regexp.MustCompile(`(?i)[a-f0-9]{64}`)
-
-// matchETags safely compares two ETags by extracting the underlying 64-character SHA-256 hash.
-// This guarantees that any proxy mutations (like Cloudflare's W/, or missing quotes) are completely ignored.
 func matchETags(computed, expected string) bool {
-	computedHash := strings.ToLower(etagRegex.FindString(computed))
-	expectedHash := strings.ToLower(etagRegex.FindString(expected))
-	
-	if computedHash == "" || expectedHash == "" {
-		return false // Reject if there isn't a valid 64-character hash
+	computedHash, ok := parseETagHash(computed)
+	if !ok {
+		return false
 	}
-	
-	return computedHash == expectedHash
+
+	for _, token := range strings.Split(expected, ",") {
+		token = strings.TrimSpace(token)
+		if token == "*" {
+			return true
+		}
+		expectedHash, ok := parseETagHash(token)
+		if ok && computedHash == expectedHash {
+			return true
+		}
+	}
+	return false
+}
+
+func parseETagHash(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(value, "W/")
+	value = strings.TrimPrefix(value, "w/")
+	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+		value = value[1 : len(value)-1]
+	}
+	if len(value) != 64 {
+		return "", false
+	}
+	for _, r := range value {
+		isHex := (r >= '0' && r <= '9') ||
+			(r >= 'a' && r <= 'f') ||
+			(r >= 'A' && r <= 'F')
+		if !isHex {
+			return "", false
+		}
+	}
+	return strings.ToLower(value), true
 }
 
 func New(root string, cacheEntries int, encryptionKey []byte) (*Store, error) {
+	return NewWithOptions(root, cacheEntries, encryptionKey, Options{})
+}
+
+func NewWithOptions(root string, cacheEntries int, encryptionKey []byte, options Options) (*Store, error) {
 	if strings.TrimSpace(root) == "" {
 		return nil, fmt.Errorf("data directory cannot be empty")
+	}
+	if options.EncryptionRequired && len(encryptionKey) != 32 {
+		return nil, fmt.Errorf("encryption is required but no valid 32-byte encryption key was provided")
 	}
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
@@ -79,14 +133,22 @@ func New(root string, cacheEntries int, encryptionKey []byte) (*Store, error) {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
 	s := &Store{
-		root:          absRoot,
-		cacheEntries:  cacheEntries,
-		encryptionKey: encryptionKey,
-		dbs:           make(map[string]*DBHandle),
+		root:               absRoot,
+		cacheEntries:       cacheEntries,
+		encryptionKey:      encryptionKey,
+		encryptionRequired: options.EncryptionRequired,
+		dbs:                make(map[string]*DBHandle),
+		schemaCache:        make(map[string]cachedSchema),
+		webhookQueue:       make(chan Event, 1024),
+		webhookLimiter:     newWebhookTargetLimiter(2),
+		webhookStop:        make(chan struct{}),
+	}
+	for i := 0; i < 4; i++ {
+		s.webhookWG.Add(1)
+		go s.webhookWorker()
 	}
 	return s, nil
 }
-
 
 func (s *Store) StartTTLWorker(ctx context.Context) {
 	ticker := time.NewTicker(60 * time.Second)
@@ -97,12 +159,17 @@ func (s *Store) StartTTLWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.purgeExpiredDocuments()
+			if err := s.purgeExpiredDocuments(); err != nil {
+				slog.Error("purge expired documents", "error", err)
+			}
 		}
 	}
 }
 
-func (s *Store) purgeExpiredDocuments() {
+func (s *Store) purgeExpiredDocuments() error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	s.mu.RLock()
 	dbNames := make(map[string]*DBHandle)
 	for name, h := range s.dbs {
@@ -111,64 +178,105 @@ func (s *Store) purgeExpiredDocuments() {
 	s.mu.RUnlock()
 
 	nowUnix := uint64(time.Now().Unix())
+	var errs []string
 
 	for dbName, h := range dbNames {
-		h.gate.RLock()
-		db := h.db
-		h.gate.RUnlock()
+		var events []Event
 
-		if db == nil {
-			continue
-		}
-
-		_ = db.Update(func(tx *bolt.Tx) error {
-			ttlBucket := tx.Bucket([]byte("__ttl_index__"))
+		err := h.Update(func(tx *bolt.Tx) error {
+			ttlBucket := tx.Bucket(ttlIndexBucketKey())
 			if ttlBucket == nil {
 				return nil
 			}
 
 			c := ttlBucket.Cursor()
 			for k, _ := c.First(); k != nil; k, _ = c.Next() {
-				if len(k) < 10 {
+				expireAt, collection, id, ok := parseTTLIndexKey(k)
+				if !ok {
+					if err := c.Delete(); err != nil {
+						return err
+					}
 					continue
 				}
-				expireAt := binary.BigEndian.Uint64(k[0:8])
 				if expireAt > nowUnix {
 					break // Keys are chronologically sorted! We can stop immediately.
 				}
 
-				rest := k[8:]
-				idx := bytes.IndexByte(rest, 0)
-				if idx == -1 {
+				currentExpireAt, exists := getDocumentTTLTx(tx, collection, id)
+				if !exists || currentExpireAt != expireAt {
+					if err := c.Delete(); err != nil {
+						return err
+					}
 					continue
 				}
-				collection := string(rest[:idx])
-				id := string(rest[idx+1:])
 
 				b := tx.Bucket([]byte(collection))
 				if b != nil {
-					_ = b.Delete([]byte(id))
-					_ = incrementCollectionCountTx(tx, collection, -1, b)
-					
-					s.PublishEvent(Event{
-						Action:     "delete",
-						Database:   dbName,
-						Collection: collection,
-						DocumentID: id,
-					})
+					existingData := b.Get([]byte(id))
+					if existingData != nil {
+						existingPlaintext, err := decryptDocument(existingData, s.encryptionKey, s.encryptionRequired)
+						if err != nil {
+							return fmt.Errorf("corrupt ttl document %s/%s: %w", collection, id, err)
+						}
+						if err := unindexDocumentTx(tx, collection, id, existingPlaintext); err != nil {
+							return fmt.Errorf("unindex ttl document %s/%s: %w", collection, id, err)
+						}
+						if err := incrementCollectionCountTx(tx, collection, -1, b); err != nil {
+							return err
+						}
+						if err := b.Delete([]byte(id)); err != nil {
+							return err
+						}
+						events = append(events, Event{
+							Action:     "delete",
+							Database:   dbName,
+							Collection: collection,
+							DocumentID: id,
+						})
+					}
 				}
-				_ = c.Delete()
+				if err := deleteTTLDocEntryTx(tx, collection, id); err != nil {
+					return err
+				}
+				if err := c.Delete(); err != nil {
+					return err
+				}
 			}
 			return nil
 		})
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", dbName, err))
+			continue
+		}
+
+		for _, event := range events {
+			s.PublishEvent(event)
+		}
 	}
+
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, ", "))
+	}
+	return nil
 }
 
 func (s *Store) Close() error {
+	s.webhookStopOnce.Do(func() {
+		close(s.webhookStop)
+	})
+	s.webhookWG.Wait()
+
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	handles := s.dbs
+	s.dbs = make(map[string]*DBHandle)
+	s.mu.Unlock()
+
 	var errs []string
-	for name, h := range s.dbs {
+	for name, h := range handles {
+		h.mu.Lock()
+		h.state = stateDeleting
+		h.mu.Unlock()
+
 		h.gate.Lock()
 		if h.db != nil {
 			if err := h.db.Close(); err != nil {
@@ -177,7 +285,6 @@ func (s *Store) Close() error {
 		}
 		h.gate.Unlock()
 	}
-	s.dbs = make(map[string]*DBHandle)
 	if len(errs) > 0 {
 		return errors.New(strings.Join(errs, ", "))
 	}
@@ -202,16 +309,21 @@ func (s *Store) getDB(database string) (*DBHandle, error) {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if h, ok := s.dbs[database]; ok {
 		h.mu.Lock()
-		defer h.mu.Unlock()
 		if h.state == stateDeleting {
+			h.mu.Unlock()
+			s.mu.Unlock()
 			return nil, ErrNotFound
 		}
 		h.lastUsed = time.Now()
+		h.mu.Unlock()
+		s.mu.Unlock()
 		return h, nil
 	}
+
+	var evictName string
+	var evictHandle *DBHandle
 
 	// LRU eviction. Close synchronously so immediate reopen attempts do not race
 	// the old bbolt file lock.
@@ -228,20 +340,37 @@ func (s *Store) getDB(database string) (*DBHandle, error) {
 			}
 		}
 		if oldest != "" {
-			oldHandle := s.dbs[oldest]
+			evictName = oldest
+			evictHandle = s.dbs[oldest]
 			delete(s.dbs, oldest)
-			oldHandle.mu.Lock()
-			oldHandle.state = stateDeleting
-			oldHandle.mu.Unlock()
-			oldHandle.gate.Lock()
-			if oldHandle.db != nil {
-				if err := oldHandle.db.Close(); err != nil {
-					oldHandle.gate.Unlock()
-					return nil, fmt.Errorf("evict database %s: %w", oldest, err)
-				}
-			}
-			oldHandle.gate.Unlock()
+			evictHandle.mu.Lock()
+			evictHandle.state = stateDeleting
+			evictHandle.mu.Unlock()
 		}
+	}
+	s.mu.Unlock()
+
+	if evictHandle != nil {
+		evictHandle.gate.Lock()
+		if evictHandle.db != nil {
+			if err := evictHandle.db.Close(); err != nil {
+				evictHandle.gate.Unlock()
+				return nil, fmt.Errorf("evict database %s: %w", evictName, err)
+			}
+		}
+		evictHandle.gate.Unlock()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if h, ok := s.dbs[database]; ok {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if h.state == stateDeleting {
+			return nil, ErrNotFound
+		}
+		h.lastUsed = time.Now()
+		return h, nil
 	}
 
 	path := filepath.Join(s.root, database+".db")
@@ -290,6 +419,39 @@ func generateID() (string, error) {
 	return hex.EncodeToString(buf[:]), nil
 }
 
+func (s *Store) Stats() Stats {
+	var stats Stats
+
+	s.mu.RLock()
+	stats.OpenDatabases = len(s.dbs)
+	s.mu.RUnlock()
+
+	s.subMu.RLock()
+	for _, collections := range s.subscribers {
+		for _, subscribers := range collections {
+			stats.Subscribers += len(subscribers)
+		}
+	}
+	s.subMu.RUnlock()
+
+	if s.webhookQueue != nil {
+		stats.WebhookQueueDepth = len(s.webhookQueue)
+	}
+
+	_ = filepath.WalkDir(s.root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".db") {
+			return nil
+		}
+		info, err := d.Info()
+		if err == nil {
+			stats.DataBytes += info.Size()
+		}
+		return nil
+	})
+
+	return stats
+}
+
 func (s *Store) BackupDatabase(ctx context.Context, database string, w io.Writer) error {
 	ctx = contextOrBackground(ctx)
 	if err := ctx.Err(); err != nil {
@@ -312,11 +474,26 @@ func (s *Store) BackupDatabase(ctx context.Context, database string, w io.Writer
 		return err
 	}
 
-	return db.View(func(tx *bolt.Tx) error {
+	tmp, err := os.CreateTemp("", "jsonvault-backup-*.db")
+	if err != nil {
+		return fmt.Errorf("create backup snapshot: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+
+	if err := db.View(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		_, err := tx.WriteTo(contextWriter{ctx: ctx, w: w})
+		_, err := tx.WriteTo(tmp)
 		return err
-	})
+	}); err != nil {
+		return err
+	}
+
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("rewind backup snapshot: %w", err)
+	}
+	_, err = io.Copy(contextWriter{ctx: ctx, w: w}, tmp)
+	return err
 }

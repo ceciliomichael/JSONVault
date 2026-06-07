@@ -15,18 +15,20 @@ var ErrMissingAdminKey = errors.New("missing JSONVAULT_ADMIN_KEY")
 var ErrMissingJWTSecret = errors.New("missing JSONVAULT_JWT_SECRET")
 
 type Config struct {
-	Addr              string
-	DataDir           string
-	AdminKey          string
-	JWTSecret         []byte
-	CacheEntries      int
-	MaxBodyBytes      int64
-	ReadHeaderTimeout time.Duration
-	ReadTimeout       time.Duration
-	WriteTimeout      time.Duration
-	IdleTimeout       time.Duration
-	ShutdownTimeout   time.Duration
-	EncryptionKey     []byte
+	Addr               string
+	DataDir            string
+	AdminKey           string
+	JWTSecret          []byte
+	CacheEntries       int
+	MaxBodyBytes       int64
+	AdminRateLimit     int
+	ReadHeaderTimeout  time.Duration
+	ReadTimeout        time.Duration
+	WriteTimeout       time.Duration
+	IdleTimeout        time.Duration
+	ShutdownTimeout    time.Duration
+	EncryptionKey      []byte
+	EncryptionRequired bool
 }
 
 func Load() (Config, error) {
@@ -64,6 +66,13 @@ func Load() (Config, error) {
 	if maxBodyBytes < 1 {
 		return Config{}, fmt.Errorf("JSONVAULT_MAX_BODY_BYTES must be greater than zero")
 	}
+	adminRateLimit, err := envInt("JSONVAULT_ADMIN_RATE_LIMIT_PER_MINUTE", 120)
+	if err != nil {
+		return Config{}, err
+	}
+	if adminRateLimit < 1 {
+		return Config{}, fmt.Errorf("JSONVAULT_ADMIN_RATE_LIMIT_PER_MINUTE must be greater than zero")
+	}
 
 	readHeaderTimeout, err := envDuration("JSONVAULT_READ_HEADER_TIMEOUT", 5*time.Second)
 	if err != nil {
@@ -87,6 +96,10 @@ func Load() (Config, error) {
 	}
 
 	encryptionKeyStr := envString("JSONVAULT_ENCRYPTION_KEY", "")
+	encryptionRequired, err := envBool("JSONVAULT_ENCRYPTION_REQUIRED", false)
+	if err != nil {
+		return Config{}, err
+	}
 	var encryptionKey []byte
 	if encryptionKeyStr != "" {
 		if len(encryptionKeyStr) != 64 {
@@ -98,20 +111,25 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("JSONVAULT_ENCRYPTION_KEY must be a valid hex string: %w", err)
 		}
 	}
+	if encryptionRequired && len(encryptionKey) != 32 {
+		return Config{}, fmt.Errorf("JSONVAULT_ENCRYPTION_REQUIRED is true but JSONVAULT_ENCRYPTION_KEY is not configured")
+	}
 
 	return Config{
-		Addr:              envString("JSONVAULT_ADDR", ":8080"),
-		DataDir:           envString("JSONVAULT_DATA_DIR", "./data"),
-		AdminKey:          adminKey,
-		JWTSecret:         jwtSecret,
-		CacheEntries:      cacheEntries,
-		MaxBodyBytes:      maxBodyBytes,
-		ReadHeaderTimeout: readHeaderTimeout,
-		ReadTimeout:       readTimeout,
-		WriteTimeout:      writeTimeout,
-		IdleTimeout:       idleTimeout,
-		ShutdownTimeout:   shutdownTimeout,
-		EncryptionKey:     encryptionKey,
+		Addr:               envString("JSONVAULT_ADDR", ":8080"),
+		DataDir:            envString("JSONVAULT_DATA_DIR", "./data"),
+		AdminKey:           adminKey,
+		JWTSecret:          jwtSecret,
+		CacheEntries:       cacheEntries,
+		MaxBodyBytes:       maxBodyBytes,
+		AdminRateLimit:     adminRateLimit,
+		ReadHeaderTimeout:  readHeaderTimeout,
+		ReadTimeout:        readTimeout,
+		WriteTimeout:       writeTimeout,
+		IdleTimeout:        idleTimeout,
+		ShutdownTimeout:    shutdownTimeout,
+		EncryptionKey:      encryptionKey,
+		EncryptionRequired: encryptionRequired,
 	}, nil
 }
 
@@ -186,7 +204,6 @@ func parseEnvLine(line string) (string, string, bool, error) {
 	return key, value, true, nil
 }
 
-
 func envString(name, fallback string) string {
 	value := strings.TrimSpace(os.Getenv(name))
 	if value == "" {
@@ -203,6 +220,18 @@ func envInt(name string, fallback int) (int, error) {
 	parsed, err := strconv.Atoi(value)
 	if err != nil {
 		return 0, fmt.Errorf("%s must be an integer: %w", name, err)
+	}
+	return parsed, nil
+}
+
+func envBool(name string, fallback bool) (bool, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean: %w", name, err)
 	}
 	return parsed, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -25,6 +26,17 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 	}
 	if err := ValidateCollectionName(collection); err != nil {
 		return nil, 0, err
+	}
+	for field := range filter {
+		if err := ValidateFieldName(field); err != nil {
+			return nil, 0, err
+		}
+	}
+	if sortField != "" {
+		field := strings.TrimPrefix(sortField, "-")
+		if err := ValidateFieldName(field); err != nil {
+			return nil, 0, err
+		}
 	}
 
 	path := filepath.Join(s.root, database+".db")
@@ -90,7 +102,7 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 				if v == nil {
 					continue
 				}
-				plaintext, err := decryptDocument(v, s.encryptionKey)
+				plaintext, owned, err := decryptDocumentOwned(v, s.encryptionKey, s.encryptionRequired)
 				if err != nil {
 					return fmt.Errorf("corrupt document (decrypt): %w", err)
 				}
@@ -115,7 +127,7 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 					if sortField != "" || (seen >= offset && len(documents) < limit) {
 						documents = append(documents, Document{
 							ID:       k,
-							Document: stdjson.RawMessage(plaintext),
+							Document: stdjson.RawMessage(stableDocumentBytes(plaintext, owned)),
 							ETag:     computeETag(plaintext),
 						})
 					}
@@ -140,21 +152,21 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 							if err := ctx.Err(); err != nil {
 								return err
 							}
-							if len(documents) >= limit {
+							if sortField == "" && len(documents) >= limit {
 								break
 							}
-							if seen >= offset {
+							if sortField != "" || seen >= offset {
 								v := b.Get(k)
 								if v == nil {
 									continue
 								}
-								plaintext, err := decryptDocument(v, s.encryptionKey)
+								plaintext, owned, err := decryptDocumentOwned(v, s.encryptionKey, s.encryptionRequired)
 								if err != nil {
 									return fmt.Errorf("corrupt document (decrypt): %w", err)
 								}
 								documents = append(documents, Document{
 									ID:       string(k),
-									Document: stdjson.RawMessage(plaintext),
+									Document: stdjson.RawMessage(stableDocumentBytes(plaintext, owned)),
 									ETag:     computeETag(plaintext),
 								})
 							}
@@ -170,7 +182,7 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 							if v == nil {
 								continue
 							}
-							plaintext, err := decryptDocument(v, s.encryptionKey)
+							plaintext, owned, err := decryptDocumentOwned(v, s.encryptionKey, s.encryptionRequired)
 							if err != nil {
 								return fmt.Errorf("corrupt document (decrypt): %w", err)
 							}
@@ -196,7 +208,7 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 								if sortField != "" || (matched >= offset && len(documents) < limit) {
 									documents = append(documents, Document{
 										ID:       string(k),
-										Document: stdjson.RawMessage(plaintext),
+										Document: stdjson.RawMessage(stableDocumentBytes(plaintext, owned)),
 										ETag:     computeETag(plaintext),
 									})
 								}
@@ -219,7 +231,7 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 					}
 				}
 
-				plaintext, err := decryptDocument(v, s.encryptionKey)
+				plaintext, owned, err := decryptDocumentOwned(v, s.encryptionKey, s.encryptionRequired)
 				if err != nil {
 					return fmt.Errorf("corrupt document (decrypt): %w", err)
 				}
@@ -244,7 +256,7 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 					if sortField != "" || (matched >= offset && len(documents) < limit) {
 						documents = append(documents, Document{
 							ID:       string(k),
-							Document: stdjson.RawMessage(plaintext),
+							Document: stdjson.RawMessage(stableDocumentBytes(plaintext, owned)),
 							ETag:     computeETag(plaintext),
 						})
 					}
@@ -264,40 +276,7 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 
 	// Apply sorting if requested
 	if sortField != "" && len(documents) > 0 {
-		desc := false
-		if strings.HasPrefix(sortField, "-") {
-			desc = true
-			sortField = sortField[1:]
-		}
-		sort.SliceStable(documents, func(i, j int) bool {
-			var a, b map[string]interface{}
-			_ = sonic.Unmarshal(documents[i].Document, &a)
-			_ = sonic.Unmarshal(documents[j].Document, &b)
-			valA := encodeIndexValue(a[sortField])
-			valB := encodeIndexValue(b[sortField])
-			if desc {
-				return valA > valB
-			}
-			return valA < valB
-		})
-
-		// Apply offset and limit after sorting
-		start := offset
-		if start > len(documents) {
-			start = len(documents)
-		}
-		end := start + limit
-		if end > len(documents) {
-			end = len(documents)
-		}
-		documents = documents[start:end]
-	}
-
-	// Deep copy required because slices inside bolt.Tx become invalid after tx closes
-	for i := range documents {
-		clone := make([]byte, len(documents[i].Document))
-		copy(clone, documents[i].Document)
-		documents[i].Document = stdjson.RawMessage(clone)
+		documents = sortAndPageDocuments(documents, sortField, limit, offset)
 	}
 
 	if len(filter) > 0 {
@@ -305,6 +284,138 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 	}
 
 	return documents, total, nil
+}
+
+type sortableValue struct {
+	kind    int
+	number  float64
+	boolean bool
+	text    string
+}
+
+const (
+	sortKindBool = iota
+	sortKindNumber
+	sortKindString
+	sortKindOther
+	sortKindMissing
+)
+
+func sortAndPageDocuments(documents []Document, sortField string, limit, offset int) []Document {
+	desc := false
+	if strings.HasPrefix(sortField, "-") {
+		desc = true
+		sortField = sortField[1:]
+	}
+
+	type sortableDocument struct {
+		document Document
+		value    sortableValue
+	}
+
+	sortable := make([]sortableDocument, 0, len(documents))
+	for _, document := range documents {
+		var parsed map[string]interface{}
+		value := sortableValue{kind: sortKindMissing}
+		if err := sonic.Unmarshal(document.Document, &parsed); err == nil {
+			if raw, ok := parsed[sortField]; ok {
+				value = normalizeSortValue(raw)
+			}
+		}
+		sortable = append(sortable, sortableDocument{document: document, value: value})
+	}
+
+	sort.SliceStable(sortable, func(i, j int) bool {
+		cmp := compareSortValues(sortable[i].value, sortable[j].value)
+		if cmp == 0 {
+			return sortable[i].document.ID < sortable[j].document.ID
+		}
+		if sortable[i].value.kind == sortKindMissing || sortable[j].value.kind == sortKindMissing {
+			return cmp < 0
+		}
+		if desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+
+	start := offset
+	if start > len(sortable) {
+		start = len(sortable)
+	}
+	end := start + limit
+	if end > len(sortable) {
+		end = len(sortable)
+	}
+
+	paged := make([]Document, 0, end-start)
+	for _, item := range sortable[start:end] {
+		paged = append(paged, item.document)
+	}
+	return paged
+}
+
+func normalizeSortValue(value interface{}) sortableValue {
+	switch v := value.(type) {
+	case bool:
+		return sortableValue{kind: sortKindBool, boolean: v}
+	case float64:
+		if math.IsNaN(v) {
+			return sortableValue{kind: sortKindMissing}
+		}
+		return sortableValue{kind: sortKindNumber, number: v}
+	case string:
+		return sortableValue{kind: sortKindString, text: v}
+	case nil:
+		return sortableValue{kind: sortKindMissing}
+	default:
+		return sortableValue{kind: sortKindOther, text: fmt.Sprintf("%v", v)}
+	}
+}
+
+func compareSortValues(a, b sortableValue) int {
+	if a.kind == sortKindMissing && b.kind == sortKindMissing {
+		return 0
+	}
+	if a.kind == sortKindMissing {
+		return 1
+	}
+	if b.kind == sortKindMissing {
+		return -1
+	}
+	if a.kind != b.kind {
+		if a.kind < b.kind {
+			return -1
+		}
+		return 1
+	}
+
+	switch a.kind {
+	case sortKindBool:
+		if a.boolean == b.boolean {
+			return 0
+		}
+		if !a.boolean {
+			return -1
+		}
+		return 1
+	case sortKindNumber:
+		if a.number < b.number {
+			return -1
+		}
+		if a.number > b.number {
+			return 1
+		}
+		return 0
+	default:
+		if a.text < b.text {
+			return -1
+		}
+		if a.text > b.text {
+			return 1
+		}
+		return 0
+	}
 }
 
 func (s *Store) GetDocument(database, collection, id string) (Document, error) {
@@ -343,14 +454,12 @@ func (s *Store) GetDocument(database, collection, id string) (Document, error) {
 			return ErrNotFound
 		}
 
-		plaintext, err := decryptDocument(data, s.encryptionKey)
+		plaintext, owned, err := decryptDocumentOwned(data, s.encryptionKey, s.encryptionRequired)
 		if err != nil {
 			return fmt.Errorf("corrupt document (decrypt): %w", err)
 		}
 
-		// make a copy because data is only valid during the transaction
-		docData := make([]byte, len(plaintext))
-		copy(docData, plaintext)
+		docData := stableDocumentBytes(plaintext, owned)
 
 		doc = Document{
 			ID:       id,

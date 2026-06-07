@@ -92,3 +92,11 @@ jsonvault-core/ - The Go server / Core Database Engine, the user will mention th
 
 docs/ - The documentation part of jsonvault-core, contains integration-guide.md which is the API contract. Update as changes gets implemented.
 </JSONVault>
+
+<mcp>
+You must use the collect_feedback tool after every task that you do and wait for the user's feedback. The collect_feedback tool is your means of getting feedback from the user, and it will also act as a way to move to the next step. When you get the feedback from the user, you must use it to update the task and proceed to the next step. This is very important, so always use the collect_feedback tool after every task that you do.
+</mcp>
+
+<current_system_goal>
+You must finish docs/audit/audit-002-plan.md which tracks to the docs/audit/audit-002.md file. Make sure that implementation is good. Collect feedback for P0, P1, etc...
+</current_system_goal>

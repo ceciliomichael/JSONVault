@@ -1,7 +1,6 @@
 package store
 
 import (
-	"encoding/binary"
 	stdjson "encoding/json"
 	"errors"
 	"fmt"
@@ -38,6 +37,9 @@ func (s *Store) CreateDocumentWithTTL(database, collection string, body []byte, 
 	if err != nil {
 		return Document{}, err
 	}
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 
 	var id string
 	err = db.Update(func(tx *bolt.Tx) error {
@@ -120,6 +122,9 @@ func (s *Store) PutDocumentWithTTL(database, collection, id string, body []byte,
 		return Document{}, err
 	}
 
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	var isInsert bool
 
 	err = db.Update(func(tx *bolt.Tx) error {
@@ -130,11 +135,11 @@ func (s *Store) PutDocumentWithTTL(database, collection, id string, body []byte,
 
 		existingData := b.Get([]byte(id))
 		if existingData != nil {
-			existingPlaintext, err := decryptDocument(existingData, s.encryptionKey)
+			existingPlaintext, err := decryptDocument(existingData, s.encryptionKey, s.encryptionRequired)
 			if err != nil {
 				return fmt.Errorf("corrupt document (decrypt): %w", err)
 			}
-	
+
 			if expectedETag != "" && !matchETags(computeETag(existingPlaintext), expectedETag) {
 				return ErrPreconditionFailed
 			}
@@ -158,6 +163,10 @@ func (s *Store) PutDocumentWithTTL(database, collection, id string, body []byte,
 			if err := setDocumentTTL(tx, collection, id, expireIn); err != nil {
 				return err
 			}
+		} else {
+			if err := clearDocumentTTL(tx, collection, id); err != nil {
+				return err
+			}
 		}
 		return indexDocumentTx(tx, collection, id, data)
 	})
@@ -170,12 +179,12 @@ func (s *Store) PutDocumentWithTTL(database, collection, id string, body []byte,
 	}
 
 	doc := Document{ID: id, Document: stdjson.RawMessage(data), ETag: computeETag(data)}
-	
+
 	action := "update"
 	if isInsert {
 		action = "insert"
 	}
-	
+
 	s.PublishEvent(Event{
 		Action:     action,
 		Database:   database,
@@ -206,6 +215,9 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte, expe
 		return Document{}, err
 	}
 
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	var data []byte
 	err = db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(collection))
@@ -217,7 +229,7 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte, expe
 			return ErrNotFound
 		}
 
-		existingPlaintext, err := decryptDocument(existingData, s.encryptionKey)
+		existingPlaintext, err := decryptDocument(existingData, s.encryptionKey, s.encryptionRequired)
 		if err != nil {
 			return fmt.Errorf("corrupt document (decrypt): %w", err)
 		}
@@ -249,7 +261,7 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte, expe
 		if err != nil {
 			return err
 		}
-		if err := s.ValidateDocument(database, collection, data); err != nil {
+		if err := s.validateDocumentWithSchema(database, collection, getSchemaTx(tx, collection), data); err != nil {
 			return err
 		}
 
@@ -302,6 +314,9 @@ func (s *Store) DeleteDocument(database, collection, id string, expectedETag str
 		return err
 	}
 
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	err = db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(collection))
 		if b == nil {
@@ -312,7 +327,7 @@ func (s *Store) DeleteDocument(database, collection, id string, expectedETag str
 			return ErrNotFound
 		}
 
-		existingPlaintext, err := decryptDocument(existingData, s.encryptionKey)
+		existingPlaintext, err := decryptDocument(existingData, s.encryptionKey, s.encryptionRequired)
 		if err != nil {
 			return fmt.Errorf("corrupt document (decrypt): %w", err)
 		}
@@ -321,6 +336,9 @@ func (s *Store) DeleteDocument(database, collection, id string, expectedETag str
 			return ErrPreconditionFailed
 		}
 		if err := incrementCollectionCountTx(tx, collection, -1, b); err != nil {
+			return err
+		}
+		if err := clearDocumentTTL(tx, collection, id); err != nil {
 			return err
 		}
 		if err := b.Delete([]byte(id)); err != nil {
@@ -344,18 +362,4 @@ func (s *Store) DeleteDocument(database, collection, id string, expectedETag str
 	})
 
 	return nil
-}
-
-func setDocumentTTL(tx *bolt.Tx, collection, id string, expireIn time.Duration) error {
-	ttlBucket, err := tx.CreateBucketIfNotExists([]byte("__ttl_index__"))
-	if err != nil {
-		return err
-	}
-	expireAt := time.Now().Add(expireIn).Unix()
-	key := make([]byte, 8+len(collection)+1+len(id))
-	binary.BigEndian.PutUint64(key[0:8], uint64(expireAt))
-	copy(key[8:], collection)
-	key[8+len(collection)] = 0
-	copy(key[8+len(collection)+1:], id)
-	return ttlBucket.Put(key, []byte{})
 }

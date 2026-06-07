@@ -34,8 +34,8 @@ func (s *Server) handleGetSchema(c *gin.Context) {
 }
 
 func (s *Server) handleSetSchema(c *gin.Context) {
-	if !s.hasScope(c, auth.ScopeReadWrite) {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "read_write scope required to modify schemas"})
+	if !s.hasScope(c, auth.ScopeAdmin) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin scope required to modify schemas"})
 		return
 	}
 

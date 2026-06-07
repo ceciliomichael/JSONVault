@@ -1,15 +1,20 @@
 package store
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"log/slog"
+	"sync"
+)
 
 // Event represents a database mutation to be broadcast to subscribers.
 type Event struct {
-	Action     string             `json:"action"` // "insert", "update", "delete"
-	Database   string             `json:"database"`
-	Collection string             `json:"collection"`
-	DocumentID string             `json:"document_id"`
-	ETag       string             `json:"etag,omitempty"`     // The new ETag
-	Document   json.RawMessage    `json:"document,omitempty"` // Included for inserts/updates
+	Sequence   uint64          `json:"sequence,omitempty"`
+	Action     string          `json:"action"` // "insert", "update", "delete"
+	Database   string          `json:"database"`
+	Collection string          `json:"collection"`
+	DocumentID string          `json:"document_id"`
+	ETag       string          `json:"etag,omitempty"`     // The new ETag
+	Document   json.RawMessage `json:"document,omitempty"` // Included for inserts/updates
 }
 
 // Subscription represents an active client listening to a specific collection.
@@ -17,6 +22,13 @@ type Subscription struct {
 	Database   string
 	Collection string
 	Ch         chan Event
+	closeOnce  sync.Once
+}
+
+func (sub *Subscription) close() {
+	sub.closeOnce.Do(func() {
+		close(sub.Ch)
+	})
 }
 
 // Subscribe creates a new subscription for a database and collection.
@@ -61,6 +73,12 @@ func (s *Store) Unsubscribe(sub *Subscription) {
 	if colls, ok := s.subscribers[sub.Database]; ok {
 		if subs, ok := colls[sub.Collection]; ok {
 			delete(subs, sub)
+			if len(subs) == 0 {
+				delete(colls, sub.Collection)
+			}
+		}
+		if len(colls) == 0 {
+			delete(s.subscribers, sub.Database)
 		}
 	}
 }
@@ -83,34 +101,79 @@ func (s *Store) GetSubscriberCount(database, collection string) int {
 
 // PublishEvent broadcasts an event to all active subscribers for that collection.
 func (s *Store) PublishEvent(event Event) {
-	// Asynchronously fire webhooks
-	go s.TriggerWebhooks(event)
+	if event.Sequence == 0 {
+		event.Sequence = s.eventSeq.Add(1)
+	}
+
+	s.enqueueWebhook(event)
 
 	s.subMu.RLock()
-	defer s.subMu.RUnlock()
-
 	if s.subscribers == nil {
+		s.subMu.RUnlock()
 		return
 	}
 
 	colls, ok := s.subscribers[event.Database]
 	if !ok {
+		s.subMu.RUnlock()
 		return
 	}
 
 	subs, ok := colls[event.Collection]
 	if !ok {
+		s.subMu.RUnlock()
 		return
 	}
 
+	var slow []*Subscription
 	for sub := range subs {
 		select {
 		case sub.Ch <- event:
-			// Event sent successfully
+			// Event sent successfully.
 		default:
-			// The channel buffer is full because the client is too slow.
-			// We intentionally drop the event rather than blocking the database engine.
-			// The client will eventually disconnect and have to resync.
+			slow = append(slow, sub)
+		}
+	}
+	s.subMu.RUnlock()
+
+	for _, sub := range slow {
+		s.Unsubscribe(sub)
+		sub.close()
+	}
+}
+
+func (s *Store) enqueueWebhook(event Event) {
+	if s.webhookQueue == nil {
+		return
+	}
+	select {
+	case <-s.webhookStop:
+		return
+	default:
+	}
+
+	select {
+	case s.webhookQueue <- event:
+	case <-s.webhookStop:
+		return
+	default:
+		slog.Warn("webhook queue full; dropping event",
+			"database", event.Database,
+			"collection", event.Collection,
+			"document_id", event.DocumentID,
+			"sequence", event.Sequence,
+		)
+	}
+}
+
+func (s *Store) webhookWorker() {
+	defer s.webhookWG.Done()
+	for {
+		select {
+		case <-s.webhookStop:
+			return
+		case event := <-s.webhookQueue:
+			s.TriggerWebhooks(event)
 		}
 	}
 }

@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"crypto/rand"
+	"errors"
 	"testing"
 )
 
@@ -58,5 +59,55 @@ func TestCrypto(t *testing.T) {
 	_, err = decryptDocument(ciphertext, key)
 	if err != ErrInvalidCiphertext {
 		t.Fatalf("expected ErrInvalidCiphertext after tampering, got %v", err)
+	}
+}
+
+func TestDecryptDocumentRejectsPlaintextWhenEncryptionRequired(t *testing.T) {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatalf("rand.Read: %v", err)
+	}
+
+	_, err := decryptDocument([]byte(`{"legacy":true}`), key, true)
+	if !errors.Is(err, ErrPlaintextNotAllowed) {
+		t.Fatalf("expected ErrPlaintextNotAllowed, got %v", err)
+	}
+}
+
+func TestStoreEncryptionRequiredRejectsLegacyPlaintext(t *testing.T) {
+	root := t.TempDir()
+	legacy, err := New(root, 8, nil)
+	if err != nil {
+		t.Fatalf("New legacy: %v", err)
+	}
+	if _, err := legacy.PutDocument("testdb", "items", "a", []byte(`{"legacy":true}`), ""); err != nil {
+		t.Fatalf("PutDocument legacy: %v", err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatalf("legacy Close: %v", err)
+	}
+
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatalf("rand.Read: %v", err)
+	}
+	secure, err := NewWithOptions(root, 8, key, Options{EncryptionRequired: true})
+	if err != nil {
+		t.Fatalf("NewWithOptions secure: %v", err)
+	}
+	defer secure.Close()
+
+	_, err = secure.GetDocument("testdb", "items", "a")
+	if !errors.Is(err, ErrPlaintextNotAllowed) {
+		t.Fatalf("expected ErrPlaintextNotAllowed, got %v", err)
+	}
+}
+
+func TestStoreEncryptionRequiredNeedsValidKey(t *testing.T) {
+	if _, err := NewWithOptions(t.TempDir(), 8, nil, Options{EncryptionRequired: true}); err == nil {
+		t.Fatal("expected missing key error")
+	}
+	if _, err := NewWithOptions(t.TempDir(), 8, []byte("short"), Options{EncryptionRequired: true}); err == nil {
+		t.Fatal("expected short key error")
 	}
 }

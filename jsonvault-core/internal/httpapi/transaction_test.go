@@ -70,8 +70,45 @@ func TestAtomicTransactions(t *testing.T) {
 	doc1Final, _ := db.GetDocument("tx_db", "users", doc1.ID)
 	var parsed1 map[string]interface{}
 	json.Unmarshal(doc1Final.Document, &parsed1)
-	
+
 	if parsed1["balance"].(float64) != 90 {
 		t.Fatalf("expected doc1 balance to rollback to 90, got %v", parsed1["balance"])
+	}
+}
+
+func TestTransactionRejectsTooManyOperations(t *testing.T) {
+	db, err := store.New(t.TempDir(), 10, nil)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer db.Close()
+
+	handler := NewUnauthenticatedHandler(db, Options{MaxBodyBytes: 1024 * 1024})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	ops := make([]map[string]any, store.MaxTransactionOps+1)
+	for i := range ops {
+		ops[i] = map[string]any{
+			"action":     "delete",
+			"collection": "users",
+			"id":         "doc",
+		}
+	}
+	payload, err := json.Marshal(map[string]any{"operations": ops})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, server.URL+"/api/v1/tx_db/transactions", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("transaction: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
 	}
 }

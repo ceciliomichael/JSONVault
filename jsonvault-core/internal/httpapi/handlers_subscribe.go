@@ -53,13 +53,16 @@ func (s *Server) handleSubscribe(c *gin.Context) {
 			fmt.Fprintf(c.Writer, ": keepalive\n\n")
 			c.Writer.Flush()
 
-		case event := <-sub.Ch:
+		case event, ok := <-sub.Ch:
+			if !ok {
+				return
+			}
 			// Format the event as a standard JSON string payload
 			data, err := json.Marshal(event)
 			if err != nil {
 				continue
 			}
-			
+
 			// SSE format requires `data: <content>\n\n`
 			fmt.Fprintf(c.Writer, "data: %s\n\n", string(data))
 			c.Writer.Flush()
@@ -81,9 +84,13 @@ func (s *Server) handlePublish(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	
+
 	if len(body) > 102400 { // 100KB payload limit to prevent memory abuse on transient streams
 		c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{"error": "payload too large for transient pub/sub (max 100KB)"})
+		return
+	}
+	if !json.Valid(body) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "bad_request", "message": "publish payload must be valid JSON"}})
 		return
 	}
 
@@ -108,8 +115,8 @@ func (s *Server) handlePresence(c *gin.Context) {
 
 	count := s.store.GetSubscriberCount(database, collection)
 	c.JSON(http.StatusOK, gin.H{
-		"database":   database,
-		"collection": collection,
+		"database":    database,
+		"collection":  collection,
 		"subscribers": count,
 	})
 }

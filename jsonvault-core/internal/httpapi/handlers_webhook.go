@@ -13,8 +13,8 @@ type setWebhooksRequest struct {
 }
 
 func (s *Server) handleSetWebhooks(c *gin.Context) {
-	if !s.hasScope(c, auth.ScopeReadWrite) {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "read_write scope required to manage webhooks"})
+	if !s.hasScope(c, auth.ScopeAdmin) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin scope required to manage webhooks"})
 		return
 	}
 
@@ -39,8 +39,8 @@ func (s *Server) handleSetWebhooks(c *gin.Context) {
 }
 
 func (s *Server) handleGetWebhooks(c *gin.Context) {
-	if !s.hasScope(c, auth.ScopeReadWrite) {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "read_write scope required to view webhooks"})
+	if !s.hasScope(c, auth.ScopeAdmin) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin scope required to view webhooks"})
 		return
 	}
 

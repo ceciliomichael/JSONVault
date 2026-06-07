@@ -6,6 +6,7 @@ import (
 )
 
 const maxNameLength = 128
+const maxFieldNameLength = 128
 
 func ValidateDatabaseName(name string) error {
 	if err := validateSegment("database", name); err != nil {
@@ -29,6 +30,27 @@ func ValidateCollectionName(name string) error {
 
 func ValidateDocumentID(id string) error {
 	return validateSegment("document id", id)
+}
+
+func ValidateFieldName(name string) error {
+	if name == "" {
+		return fmt.Errorf("%w: field cannot be empty", ErrInvalidName)
+	}
+	if len(name) > maxFieldNameLength {
+		return fmt.Errorf("%w: field cannot exceed %d bytes", ErrInvalidName, maxFieldNameLength)
+	}
+	for _, r := range name {
+		valid := (r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			r == '_' ||
+			r == '-' ||
+			r == '.'
+		if !valid {
+			return fmt.Errorf("%w: field contains unsupported character %q", ErrInvalidName, r)
+		}
+	}
+	return nil
 }
 
 func validateSegment(kind, value string) error {

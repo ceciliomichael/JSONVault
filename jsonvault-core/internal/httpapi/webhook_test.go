@@ -31,11 +31,17 @@ func TestWebhooks(t *testing.T) {
 	var wg sync.WaitGroup
 	var receivedPayload map[string]interface{}
 	var receivedSignature string
+	var receivedTimestamp string
+	var receivedEventID string
+	var receivedSignatureV2 string
 
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		json.Unmarshal(body, &receivedPayload)
 		receivedSignature = r.Header.Get("X-JSONVault-Signature")
+		receivedTimestamp = r.Header.Get("X-JSONVault-Timestamp")
+		receivedEventID = r.Header.Get("X-JSONVault-Event-ID")
+		receivedSignatureV2 = r.Header.Get("X-JSONVault-Signature-V2")
 		wg.Done()
 		w.WriteHeader(200)
 	}))
@@ -89,5 +95,35 @@ func TestWebhooks(t *testing.T) {
 
 	if receivedSignature == "" {
 		t.Fatalf("expected X-JSONVault-Signature header")
+	}
+	if receivedTimestamp == "" || receivedEventID == "" || receivedSignatureV2 == "" {
+		t.Fatalf("expected replay protection headers, got timestamp=%q eventID=%q signatureV2=%q", receivedTimestamp, receivedEventID, receivedSignatureV2)
+	}
+}
+
+func TestWebhookRejectsInvalidConfig(t *testing.T) {
+	t.Setenv("JSONVAULT_ALLOW_LOCAL_WEBHOOKS", "")
+
+	db, err := store.New(t.TempDir(), 10, nil)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer db.Close()
+
+	handler := NewUnauthenticatedHandler(db, Options{MaxBodyBytes: 1024 * 1024})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	payload := `{"webhooks":[{"url":"http://127.0.0.1:8080/hook","events":["insert"]}]}`
+	req, _ := http.NewRequest(http.MethodPut, server.URL+"/api/v1/wh_db/users/webhooks", bytes.NewReader([]byte(payload)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("SetWebhooks: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
 	}
 }
