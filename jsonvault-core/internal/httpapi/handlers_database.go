@@ -10,9 +10,15 @@ import (
 func (s *Server) handleDatabases(c *gin.Context) {
 	switch c.Request.Method {
 	case http.MethodGet:
-		if !s.hasScope(c, auth.ScopeReadOnly) {
+		if !contextHasCapability(c, auth.CapabilityMetadataRead) && !contextHasCapability(c, auth.CapabilityDocumentsRead) && !s.hasScope(c, auth.ScopeAdmin) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			return
+		}
+		if dbConstraint, _ := c.Get("jwt_db"); dbConstraint != "*" {
+			if db, ok := dbConstraint.(string); ok && db != "" {
+				c.JSON(http.StatusOK, []string{db})
+				return
+			}
 		}
 		databases, err := s.store.ListDatabases()
 		if err != nil {

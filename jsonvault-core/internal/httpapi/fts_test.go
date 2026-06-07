@@ -56,7 +56,7 @@ func TestFullTextSearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode err: %v", err)
 	}
-	
+
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}

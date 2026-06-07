@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -31,10 +32,28 @@ func (s *Server) handleSubscribe(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 
 	// Flush headers immediately to establish the stream with the client
-	c.Writer.Flush()
+	if err := rc.Flush(); err != nil {
+		return
+	}
 
 	sub := s.store.Subscribe(database, collection)
 	defer s.store.Unsubscribe(sub)
+
+	lastSent := parseLastEventID(c)
+	if lastSent > 0 {
+		events, err := s.store.ReplayEvents(database, collection, lastSent, 1000)
+		if err != nil {
+			return
+		}
+		for _, event := range events {
+			if !writeSSEEvent(c, rc, event) {
+				return
+			}
+			if event.Sequence > lastSent {
+				lastSent = event.Sequence
+			}
+		}
+	}
 
 	// Keep-Alive Ticker: Prevents reverse proxies (Nginx/Cloudflare) from severing idle streams.
 	ticker := time.NewTicker(15 * time.Second)
@@ -50,24 +69,60 @@ func (s *Server) handleSubscribe(c *gin.Context) {
 
 		case <-ticker.C:
 			// Send a lightweight SSE comment to trick proxies into keeping the socket alive
-			fmt.Fprintf(c.Writer, ": keepalive\n\n")
-			c.Writer.Flush()
+			if _, err := fmt.Fprintf(c.Writer, ": keepalive\n\n"); err != nil {
+				return
+			}
+			if err := rc.Flush(); err != nil {
+				return
+			}
 
 		case event, ok := <-sub.Ch:
 			if !ok {
 				return
 			}
-			// Format the event as a standard JSON string payload
-			data, err := json.Marshal(event)
-			if err != nil {
+			if event.Sequence <= lastSent {
 				continue
 			}
-
-			// SSE format requires `data: <content>\n\n`
-			fmt.Fprintf(c.Writer, "data: %s\n\n", string(data))
-			c.Writer.Flush()
+			if !writeSSEEvent(c, rc, event) {
+				return
+			}
+			lastSent = event.Sequence
 		}
 	}
+}
+
+func parseLastEventID(c *gin.Context) uint64 {
+	raw := c.GetHeader("Last-Event-ID")
+	if raw == "" {
+		raw = c.Query("last_event_id")
+	}
+	if raw == "" {
+		return 0
+	}
+	value, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return value
+}
+
+func writeSSEEvent(c *gin.Context, rc *http.ResponseController, event store.Event) bool {
+	data, err := json.Marshal(event)
+	if err != nil {
+		return true
+	}
+	if _, err := fmt.Fprintf(c.Writer, "data: %s\n", string(data)); err != nil {
+		return false
+	}
+	if event.Sequence > 0 {
+		if _, err := fmt.Fprintf(c.Writer, "id: %d\n", event.Sequence); err != nil {
+			return false
+		}
+	}
+	if _, err := fmt.Fprintf(c.Writer, "\n"); err != nil {
+		return false
+	}
+	return rc.Flush() == nil
 }
 
 func (s *Server) handlePublish(c *gin.Context) {

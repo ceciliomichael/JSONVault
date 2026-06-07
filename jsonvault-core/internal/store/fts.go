@@ -18,6 +18,14 @@ var (
 	ftsReverseBucket = []byte("_fts_reverse")
 )
 
+const (
+	maxFTSIndexedTextBytes = 256 * 1024
+	maxFTSTokensPerDoc     = 2048
+	maxFTSQueryTokens      = 16
+	maxFTSTokenBytes       = 64
+	ftsBackfillBatchSize   = 500
+)
+
 type FTSConfig struct {
 	Fields []string `json:"fields"`
 }
@@ -50,10 +58,8 @@ func (s *Store) SetFTSConfig(database, collection string, fields []string) error
 		return err
 	}
 
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-
-	return db.Update(func(tx *bolt.Tx) error {
+	unlock := s.lockDatabaseWrite(database)
+	err = db.Update(func(tx *bolt.Tx) error {
 		if err := deleteFTSForCollectionTx(tx, collection); err != nil {
 			return err
 		}
@@ -76,13 +82,101 @@ func (s *Store) SetFTSConfig(database, collection string, fields []string) error
 			return err
 		}
 
+		return nil
+	})
+	unlock()
+	if err != nil {
+		return err
+	}
+
+	var after []byte
+	for {
+		batch, lastKey, done, err := s.collectFTSBackfillBatch(db, collection, after, ftsBackfillBatchSize)
+		if err != nil {
+			return err
+		}
+		if len(batch) > 0 {
+			unlock := s.lockDatabaseWrite(database)
+			err = s.applyFTSBackfillBatch(db, collection, batch)
+			unlock()
+			if err != nil {
+				return err
+			}
+		}
+		if done {
+			break
+		}
+		after = lastKey
+	}
+	return nil
+}
+
+func (s *Store) GetFTSConfig(database, collection string) (FTSConfig, bool, error) {
+	if err := ValidateDatabaseName(database); err != nil {
+		return FTSConfig{}, false, err
+	}
+	if err := ValidateCollectionName(collection); err != nil {
+		return FTSConfig{}, false, err
+	}
+
+	db, err := s.getDB(database)
+	if err != nil {
+		return FTSConfig{}, false, err
+	}
+
+	var config FTSConfig
+	found := false
+	err = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(ftsConfigBucket)
+		if b == nil {
+			return nil
+		}
+		data := b.Get([]byte(collection))
+		if data == nil {
+			return nil
+		}
+		if err := json.Unmarshal(data, &config); err != nil {
+			return fmt.Errorf("corrupt fts config: %w", err)
+		}
+		found = true
+		return nil
+	})
+	return config, found, err
+}
+
+type ftsBackfillEntry struct {
+	docID string
+	etag  string
+	doc   map[string]interface{}
+}
+
+func (s *Store) collectFTSBackfillBatch(db *DBHandle, collection string, after []byte, limit int) ([]ftsBackfillEntry, []byte, bool, error) {
+	var batch []ftsBackfillEntry
+	var lastKey []byte
+	var done bool
+
+	err := db.View(func(tx *bolt.Tx) error {
 		colBucket := tx.Bucket([]byte(collection))
 		if colBucket == nil {
+			done = true
 			return nil
 		}
 
 		c := colBucket.Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
+		var k, v []byte
+		if len(after) == 0 {
+			k, v = c.First()
+		} else {
+			k, v = c.Seek(after)
+			if bytes.Equal(k, after) {
+				k, v = c.Next()
+			}
+		}
+
+		scanned := 0
+		for ; k != nil && scanned < limit; k, v = c.Next() {
+			scanned++
+			lastKey = append(lastKey[:0], k...)
 			plaintext, err := decryptDocument(v, s.encryptionKey, s.encryptionRequired)
 			if err != nil {
 				return fmt.Errorf("corrupt document (decrypt): %w", err)
@@ -91,17 +185,45 @@ func (s *Store) SetFTSConfig(database, collection string, fields []string) error
 			if err := json.Unmarshal(plaintext, &parsed); err != nil {
 				continue
 			}
-			if err := indexFTS(tx, collection, string(k), parsed); err != nil {
+			batch = append(batch, ftsBackfillEntry{
+				docID: string(k),
+				etag:  computeETag(plaintext),
+				doc:   parsed,
+			})
+		}
+		done = k == nil
+		return nil
+	})
+	return batch, lastKey, done, err
+}
+
+func (s *Store) applyFTSBackfillBatch(db *DBHandle, collection string, batch []ftsBackfillEntry) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		colBucket := tx.Bucket([]byte(collection))
+		if colBucket == nil {
+			return nil
+		}
+		for _, entry := range batch {
+			current := colBucket.Get([]byte(entry.docID))
+			if current == nil {
+				continue
+			}
+			plaintext, err := decryptDocument(current, s.encryptionKey, s.encryptionRequired)
+			if err != nil {
+				return fmt.Errorf("corrupt document (decrypt): %w", err)
+			}
+			if computeETag(plaintext) != entry.etag {
+				continue
+			}
+			if err := indexFTS(tx, collection, entry.docID, entry.doc); err != nil {
 				return err
 			}
 		}
-
 		return nil
 	})
 }
 
-// GetFTSConfig retrieves the FTS configuration for a collection.
-func (s *Store) GetFTSConfig(tx *bolt.Tx, collection string) (*FTSConfig, error) {
+func getFTSConfig(tx *bolt.Tx, collection string) (*FTSConfig, error) {
 	return getFTSConfigTx(tx, collection)
 }
 
@@ -126,6 +248,17 @@ func getFTSConfigTx(tx *bolt.Tx, collection string) (*FTSConfig, error) {
 
 // tokenize extracts lowercase alphanumeric words from a string.
 func tokenize(text string) []string {
+	return tokenizeLimited(text, maxFTSTokensPerDoc)
+}
+
+func tokenizeQuery(text string) []string {
+	return tokenizeLimited(text, maxFTSQueryTokens)
+}
+
+func tokenizeLimited(text string, maxTokens int) []string {
+	if len(text) > maxFTSIndexedTextBytes {
+		text = text[:maxFTSIndexedTextBytes]
+	}
 	f := func(c rune) bool {
 		return !unicode.IsLetter(c) && !unicode.IsNumber(c)
 	}
@@ -135,7 +268,14 @@ func tokenize(text string) []string {
 	uniqueWords := make(map[string]struct{})
 	for _, w := range words {
 		if len(w) > 1 { // Ignore single character words
-			uniqueWords[strings.ToLower(w)] = struct{}{}
+			w = strings.ToLower(w)
+			if len(w) > maxFTSTokenBytes {
+				w = w[:maxFTSTokenBytes]
+			}
+			uniqueWords[w] = struct{}{}
+			if maxTokens > 0 && len(uniqueWords) >= maxTokens {
+				break
+			}
 		}
 	}
 
@@ -259,7 +399,7 @@ func unindexFTS(tx *bolt.Tx, collection, docID string) error {
 
 // searchFTS intersects token arrays to find documents matching the query.
 func searchFTS(tx *bolt.Tx, collection, query string) []string {
-	tokens := tokenize(query)
+	tokens := tokenizeQuery(query)
 	if len(tokens) == 0 {
 		return nil
 	}

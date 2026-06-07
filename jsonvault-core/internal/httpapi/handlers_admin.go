@@ -9,15 +9,18 @@ import (
 )
 
 type CreateKeyRequest struct {
-	Scope      string `json:"scope" binding:"required"` // read_write, read_only
-	Database   string `json:"database"`                 // Optional: restrict to specific database
-	Collection string `json:"collection"`               // Optional: restrict to specific collection
+	Scope        string   `json:"scope" binding:"required"`
+	Database     string   `json:"database"`
+	Collection   string   `json:"collection"`
+	Capabilities []string `json:"capabilities"`
 }
 
 // handleCreateKey mints a new JWT API key for a client.
 func (s *Server) handleCreateKey(c *gin.Context) {
-	if !s.hasScope(c, auth.ScopeAdmin) {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+	isAdmin := s.hasScope(c, auth.ScopeAdmin)
+	canManageKeys := isAdmin || contextHasCapability(c, auth.CapabilityKeysManage)
+	if !isAdmin && !canManageKeys {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin scope or keys:manage capability required"})
 		return
 	}
 
@@ -32,8 +35,9 @@ func (s *Server) handleCreateKey(c *gin.Context) {
 		return
 	}
 
-	if req.Scope != string(auth.ScopeReadWrite) && req.Scope != string(auth.ScopeReadOnly) {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid scope, must be read_write or read_only"})
+	scope := auth.Scope(req.Scope)
+	if scope != auth.ScopeReadWrite && scope != auth.ScopeReadOnly && scope != auth.ScopeProjectAdmin {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid scope, must be read_write, read_only, or project_admin"})
 		return
 	}
 
@@ -45,8 +49,28 @@ func (s *Server) handleCreateKey(c *gin.Context) {
 	if collScope == "" {
 		collScope = "*"
 	}
+	if !isAdmin {
+		if scope == auth.ScopeProjectAdmin || len(req.Capabilities) > 0 {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "project key managers can only mint read_only or read_write runtime keys"})
+			return
+		}
+		if !tokenAllowsResource(c, dbScope, collScope) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "requested key is outside caller constraints"})
+			return
+		}
+	}
+	if scope == auth.ScopeProjectAdmin && dbScope == "*" {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "project_admin keys must be constrained to one database"})
+		return
+	}
 
-	key, err := s.authenticator.GenerateKeyWithMetadata(auth.Scope(req.Scope), dbScope, collScope)
+	capabilities, ok := auth.NormalizeCapabilities(req.Capabilities)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid capability"})
+		return
+	}
+
+	key, err := s.authenticator.GenerateKeyWithMetadataAndCapabilities(scope, dbScope, collScope, capabilities)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to generate key"})
 		return
@@ -59,7 +83,15 @@ func (s *Server) handleCreateKey(c *gin.Context) {
 		"scope":      req.Scope,
 		"database":   dbScope,
 		"collection": collScope,
+		"capabilities": func() []string {
+			values := make([]string, 0, len(key.Capabilities))
+			for _, capability := range key.Capabilities {
+				values = append(values, string(capability))
+			}
+			return values
+		}(),
 	})
+	s.audit.append(auditRecord{Actor: tokenID(c), Action: "key.create", Database: dbScope, Collection: collScope, Target: key.ID, Status: "ready"})
 }
 
 func (s *Server) handleRevokeKey(c *gin.Context) {

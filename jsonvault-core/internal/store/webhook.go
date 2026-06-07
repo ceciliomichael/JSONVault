@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,7 +41,13 @@ type WebhookRecord struct {
 type webhookTargetLimiter struct {
 	mu       sync.Mutex
 	capacity int
-	limits   map[string]chan struct{}
+	maxKeys  int
+	limits   map[string]*webhookTargetLimit
+}
+
+type webhookTargetLimit struct {
+	ch       chan struct{}
+	lastUsed time.Time
 }
 
 func newWebhookTargetLimiter(capacity int) *webhookTargetLimiter {
@@ -48,7 +56,8 @@ func newWebhookTargetLimiter(capacity int) *webhookTargetLimiter {
 	}
 	return &webhookTargetLimiter{
 		capacity: capacity,
-		limits:   make(map[string]chan struct{}),
+		maxKeys:  1024,
+		limits:   make(map[string]*webhookTargetLimit),
 	}
 }
 
@@ -62,16 +71,30 @@ func (l *webhookTargetLimiter) acquire(rawURL string) (func(), bool) {
 	l.mu.Lock()
 	limit := l.limits[key]
 	if limit == nil {
-		limit = make(chan struct{}, l.capacity)
+		l.pruneIdleLocked()
+		if l.maxKeys > 0 && len(l.limits) >= l.maxKeys {
+			l.mu.Unlock()
+			return nil, false
+		}
+		limit = &webhookTargetLimit{ch: make(chan struct{}, l.capacity)}
 		l.limits[key] = limit
 	}
+	limit.lastUsed = time.Now()
 	l.mu.Unlock()
 
 	select {
-	case limit <- struct{}{}:
-		return func() { <-limit }, true
+	case limit.ch <- struct{}{}:
+		return func() { <-limit.ch }, true
 	default:
 		return nil, false
+	}
+}
+
+func (l *webhookTargetLimiter) pruneIdleLocked() {
+	for key, limit := range l.limits {
+		if len(limit.ch) == 0 && time.Since(limit.lastUsed) > time.Minute {
+			delete(l.limits, key)
+		}
 	}
 }
 
@@ -102,8 +125,8 @@ func (s *Store) SetWebhooks(database, collection string, webhooks []WebhookConfi
 
 	var secret string
 
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	unlock := s.lockDatabaseWrite(database)
+	defer unlock()
 
 	err = db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists(webhookBucket)
@@ -219,14 +242,20 @@ func deleteWebhooksTx(tx *bolt.Tx, collection string) error {
 
 // TriggerWebhooks asynchronously fires webhooks for a given event.
 func (s *Store) TriggerWebhooks(event Event) {
+	if err := s.deliverEventWebhooks(event); err != nil {
+		slog.Warn("webhook delivery failed", "database", event.Database, "collection", event.Collection, "sequence", event.Sequence, "error", err)
+	}
+}
+
+func (s *Store) deliverEventWebhooks(event Event) error {
 	record, err := s.GetWebhooks(event.Database, event.Collection)
 	if err != nil || record == nil || len(record.Webhooks) == 0 {
-		return
+		return err
 	}
 
 	payload, err := json.Marshal(event)
 	if err != nil {
-		return
+		return err
 	}
 
 	// Compute HMAC signature
@@ -240,6 +269,7 @@ func (s *Store) TriggerWebhooks(event Event) {
 	v2Mac.Write(v2Payload)
 	v2Signature := hex.EncodeToString(v2Mac.Sum(nil))
 
+	var errs []string
 	for _, hook := range record.Webhooks {
 		// Filter by event type
 		matches := false
@@ -255,21 +285,26 @@ func (s *Store) TriggerWebhooks(event Event) {
 
 		release, ok := s.webhookLimiter.acquire(hook.URL)
 		if !ok {
-			slog.Warn("webhook target limit reached; dropping delivery", "url", hook.URL)
+			errs = append(errs, fmt.Sprintf("%s: target concurrency limit reached", hook.URL))
 			continue
 		}
 
 		client, ok := safeWebhookHTTPClient(hook.URL)
 		if !ok {
 			release()
+			errs = append(errs, fmt.Sprintf("%s: unsafe target", hook.URL))
 			continue
 		}
 
 		if err := deliverWebhook(client, hook.URL, payload, signature, timestamp, eventID, v2Signature); err != nil {
-			slog.Warn("webhook delivery failed", "url", hook.URL, "error", err)
+			errs = append(errs, fmt.Sprintf("%s: %v", hook.URL, err))
 		}
 		release()
 	}
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 func deliverWebhook(client *http.Client, target string, payload []byte, signature, timestamp, eventID, v2Signature string) error {
@@ -300,6 +335,130 @@ func deliverWebhook(client *http.Client, target string, payload []byte, signatur
 		}
 	}
 	return lastErr
+}
+
+func (s *Store) processWebhookOutboxAllDatabases() {
+	databases, err := s.ListDatabases()
+	if err != nil {
+		slog.Warn("list databases for webhook outbox", "error", err)
+		return
+	}
+	for _, database := range databases {
+		s.processWebhookOutboxForDatabase(database)
+	}
+}
+
+func (s *Store) processWebhookOutboxForDatabase(database string) {
+	db, err := s.getDB(database)
+	if err != nil {
+		return
+	}
+	for i := 0; i < 100; i++ {
+		delivery, ok, err := claimWebhookDelivery(db)
+		if err != nil {
+			slog.Warn("claim webhook delivery", "database", database, "error", err)
+			return
+		}
+		if !ok {
+			return
+		}
+		if err := s.deliverEventWebhooks(delivery.Event); err != nil {
+			if markErr := failWebhookDelivery(db, delivery.Sequence, err); markErr != nil {
+				slog.Warn("mark webhook delivery failed", "database", database, "sequence", delivery.Sequence, "error", markErr)
+			}
+			continue
+		}
+		if err := deleteWebhookDelivery(db, delivery.Sequence); err != nil {
+			slog.Warn("mark webhook delivery delivered", "database", database, "sequence", delivery.Sequence, "error", err)
+		}
+	}
+}
+
+func claimWebhookDelivery(db *DBHandle) (WebhookDelivery, bool, error) {
+	var claimed WebhookDelivery
+	now := time.Now().Unix()
+	err := db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(webhookOutboxBucket)
+		if b == nil {
+			return nil
+		}
+		c := b.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var delivery WebhookDelivery
+			if err := json.Unmarshal(v, &delivery); err != nil {
+				continue
+			}
+			if delivery.Status == webhookStatusPending && delivery.NextAttemptAt > now {
+				continue
+			}
+			if delivery.Status == webhookStatusDelivering && now-delivery.UpdatedAt < 60 {
+				continue
+			}
+			if delivery.Status == webhookStatusFailed {
+				continue
+			}
+			delivery.Status = webhookStatusDelivering
+			delivery.UpdatedAt = now
+			encoded, err := json.Marshal(delivery)
+			if err != nil {
+				return err
+			}
+			if err := b.Put(k, encoded); err != nil {
+				return err
+			}
+			claimed = delivery
+			return nil
+		}
+		return nil
+	})
+	if err != nil {
+		return WebhookDelivery{}, false, err
+	}
+	return claimed, claimed.Sequence != 0, nil
+}
+
+func failWebhookDelivery(db *DBHandle, sequence uint64, deliveryErr error) error {
+	now := time.Now().Unix()
+	return db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(webhookOutboxBucket)
+		if b == nil {
+			return ErrNotFound
+		}
+		key := uint64Key(sequence)
+		data := b.Get(key)
+		if data == nil {
+			return ErrNotFound
+		}
+		var delivery WebhookDelivery
+		if err := json.Unmarshal(data, &delivery); err != nil {
+			return err
+		}
+		delivery.Attempts++
+		delivery.LastError = deliveryErr.Error()
+		delivery.UpdatedAt = now
+		if delivery.Attempts >= webhookDeliveryAttempts {
+			delivery.Status = webhookStatusFailed
+			delivery.NextAttemptAt = 0
+		} else {
+			delivery.Status = webhookStatusPending
+			delivery.NextAttemptAt = now + int64(delivery.Attempts*delivery.Attempts)
+		}
+		encoded, err := json.Marshal(delivery)
+		if err != nil {
+			return err
+		}
+		return b.Put(key, encoded)
+	})
+}
+
+func deleteWebhookDelivery(db *DBHandle, sequence uint64) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(webhookOutboxBucket)
+		if b == nil {
+			return nil
+		}
+		return b.Delete(uint64Key(sequence))
+	})
 }
 
 // SSRF Protection: Ensure URL does not point to internal/private IPs.

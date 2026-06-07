@@ -175,5 +175,5 @@ environment-specific validation:
 - `docs/audit/audit-002-plan.md`: checklist status.
 - `docs/audit/audit-002.md`: original findings and audit rationale.
 - `docs/integration-guide.md`: client-facing API behavior.
-- `docs/server-guide.md`: server configuration and operations.
+- `docs/operator-guide.md`: server/operator configuration and operations.
 - `docs/architecture.md`: current architecture model.

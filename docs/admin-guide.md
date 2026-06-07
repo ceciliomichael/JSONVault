@@ -7,7 +7,9 @@ This guide is meant strictly for the Server Administrator or the backend service
 The `JSONVAULT_ADMIN_KEY` configured in your `.env` file grants root access to the entire server.
 
 ### Generating Scoped API Keys (JWTs)
-Your dashboard backend should use the Admin Key to programmatically generate restricted API keys for your users.
+Your dashboard backend should use the Admin Key to programmatically generate
+restricted API keys for your users. Keep the root admin key on trusted
+server-side infrastructure only.
 
 - **Request:** `POST /api/v1/admin/keys`
 - **Headers:** `Authorization: Bearer <your-admin-key>`
@@ -19,6 +21,33 @@ Your dashboard backend should use the Admin Key to programmatically generate res
     "collection": "*" 
   }
   ```
+
+For trusted project dashboards, CLIs, or backend tools, you can mint a
+database-constrained project management token:
+
+```json
+{
+  "scope": "project_admin",
+  "database": "proj_abc123",
+  "collection": "*",
+  "capabilities": [
+    "metadata:read",
+    "documents:read",
+    "documents:write",
+    "indexes:manage",
+    "fts:manage",
+    "schemas:manage",
+    "webhooks:manage",
+    "collections:manage",
+    "operations:read",
+    "operations:cancel",
+    "keys:manage"
+  ]
+}
+```
+
+Do not put project management tokens in browser or mobile runtime code. Use
+normal `read_only` or `read_write` keys for app clients.
 - **Response (201 Created):**
   ```json
   {
@@ -38,16 +67,21 @@ If you are building a dashboard (like Firebase/Supabase), your backend doesn't n
 1. **Algorithm:** HMAC SHA-256 (`HS256`)
 2. **Secret:** The exact string value of your `JSONVAULT_JWT_SECRET`.
 3. **Payload:** A standard JSON object with the following fields:
-   - `scope`: String (either `"read_only"`, `"read_write"`, or `"admin"`)
+   - `scope`: String (`"read_only"`, `"read_write"`, or `"project_admin"`).
+     The root `"admin"` scope is reserved for `JSONVAULT_ADMIN_KEY` and is not
+     accepted from signed user JWTs.
    - `database`: String (the specific database name, or `"*"` for all)
    - `collection`: String (the specific collection name, or `"*"` for all)
+   - `capabilities`: Optional array of management capability strings for
+     constrained project management tokens.
    - `iat`: Issued-at Unix timestamp
    - `nbf`: Not-before Unix timestamp
    - `exp`: Expiration Unix timestamp
    - `jti`: Unique token ID used for revocation
 
 Once your backend signs this payload, the resulting token string is immediately valid on your JSONVault server!
-Provide this `"token"` string to the user so they can connect their frontend app to their specific database!
+Provide runtime `read_only` or `read_write` tokens to app clients. Provide
+project management tokens only to trusted dashboard/backend/CLI contexts.
 
 ## Key Revocation & Expiration
 Keys generated through `POST /api/v1/admin/keys` expire automatically after 90 days.

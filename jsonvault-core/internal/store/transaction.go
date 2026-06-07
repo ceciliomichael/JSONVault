@@ -43,8 +43,8 @@ func (s *Store) ExecuteTransaction(database string, ops []TransactionOp) ([]Docu
 		return nil, err
 	}
 
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	unlock := s.lockDatabaseWrite(database)
+	defer unlock()
 
 	var results []Document
 	var events []Event
@@ -69,6 +69,9 @@ func (s *Store) ExecuteTransaction(database string, ops []TransactionOp) ([]Docu
 				data, err := normalizeJSON(op.Body)
 				if err != nil {
 					return fmt.Errorf("op[%d] normalize json: %w", i, err)
+				}
+				if err := s.enforceDocumentSize(data); err != nil {
+					return fmt.Errorf("op[%d] %w", i, err)
 				}
 				if err := s.validateDocumentWithSchema(database, collection, getSchemaTx(tx, collection), data); err != nil {
 					return fmt.Errorf("op[%d] %w", i, err)
@@ -119,7 +122,7 @@ func (s *Store) ExecuteTransaction(database string, ops []TransactionOp) ([]Docu
 				if isNew {
 					action = "insert"
 				}
-				events = append(events, Event{
+				event, err := recordEventTx(tx, Event{
 					Action:     action,
 					Database:   database,
 					Collection: collection,
@@ -127,6 +130,10 @@ func (s *Store) ExecuteTransaction(database string, ops []TransactionOp) ([]Docu
 					ETag:       doc.ETag,
 					Document:   doc.Document,
 				})
+				if err != nil {
+					return fmt.Errorf("op[%d] event: %w", i, err)
+				}
+				events = append(events, event)
 
 			case "patch":
 				existingData := b.Get([]byte(op.ID))
@@ -164,6 +171,9 @@ func (s *Store) ExecuteTransaction(database string, ops []TransactionOp) ([]Docu
 				if err != nil {
 					return fmt.Errorf("op[%d] normalize merged: %w", i, err)
 				}
+				if err := s.enforceDocumentSize(data); err != nil {
+					return fmt.Errorf("op[%d] %w", i, err)
+				}
 				if err := s.validateDocumentWithSchema(database, collection, getSchemaTx(tx, collection), data); err != nil {
 					return fmt.Errorf("op[%d] %w", i, err)
 				}
@@ -186,7 +196,7 @@ func (s *Store) ExecuteTransaction(database string, ops []TransactionOp) ([]Docu
 				doc := Document{ID: op.ID, Document: stdjson.RawMessage(data), ETag: computeETag(data)}
 				results = append(results, doc)
 
-				events = append(events, Event{
+				event, err := recordEventTx(tx, Event{
 					Action:     "update",
 					Database:   database,
 					Collection: collection,
@@ -194,6 +204,10 @@ func (s *Store) ExecuteTransaction(database string, ops []TransactionOp) ([]Docu
 					ETag:       doc.ETag,
 					Document:   doc.Document,
 				})
+				if err != nil {
+					return fmt.Errorf("op[%d] event: %w", i, err)
+				}
+				events = append(events, event)
 
 			case "delete":
 				existingData := b.Get([]byte(op.ID))
@@ -223,12 +237,16 @@ func (s *Store) ExecuteTransaction(database string, ops []TransactionOp) ([]Docu
 
 				results = append(results, Document{ID: op.ID})
 
-				events = append(events, Event{
+				event, err := recordEventTx(tx, Event{
 					Action:     "delete",
 					Database:   database,
 					Collection: collection,
 					DocumentID: op.ID,
 				})
+				if err != nil {
+					return fmt.Errorf("op[%d] event: %w", i, err)
+				}
+				events = append(events, event)
 
 			default:
 				return fmt.Errorf("op[%d] invalid action '%s'", i, op.Action)

@@ -12,6 +12,7 @@ import (
 var ErrSchemaValidation = errors.New("schema validation failed")
 
 const schemaBucketPrefix = "_schemas"
+const maxCachedSchemas = 1024
 
 type cachedSchema struct {
 	fingerprint [32]byte
@@ -161,6 +162,12 @@ func (s *Store) validateDocumentWithSchema(database, collection string, schemaBy
 	}
 
 	s.schemaMu.Lock()
+	if len(s.schemaCache) >= maxCachedSchemas {
+		for key := range s.schemaCache {
+			delete(s.schemaCache, key)
+			break
+		}
+	}
 	s.schemaCache[cacheKey] = cachedSchema{fingerprint: fingerprint, schema: schema}
 	s.schemaMu.Unlock()
 

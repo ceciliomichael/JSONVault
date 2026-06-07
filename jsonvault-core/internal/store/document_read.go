@@ -16,40 +16,68 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+type ListResult struct {
+	Documents []Document
+	Total     int
+	Stats     QueryStats
+}
+
+type QueryStats struct {
+	ScannedDocuments int
+	ScannedBytes     int64
+	ReturnedBytes    int64
+	IndexUsed        string
+	SortMode         string
+	FTSCandidates    int
+}
+
 func (s *Store) ListDocuments(ctx context.Context, database, collection string, limit, offset int, filter map[string]interface{}, sortField string, searchQuery string) ([]Document, int, error) {
-	ctx = contextOrBackground(ctx)
-	if err := ctx.Err(); err != nil {
+	result, err := s.ListDocumentsDetailed(ctx, database, collection, limit, offset, filter, sortField, searchQuery)
+	if err != nil {
 		return nil, 0, err
+	}
+	return result.Documents, result.Total, nil
+}
+
+func (s *Store) ListDocumentsDetailed(ctx context.Context, database, collection string, limit, offset int, filter map[string]interface{}, sortField string, searchQuery string) (ListResult, error) {
+	ctx = contextOrBackground(ctx)
+	if s.maxQueryDuration > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.maxQueryDuration)
+		defer cancel()
+	}
+	if err := ctx.Err(); err != nil {
+		return ListResult{}, err
 	}
 	if err := ValidateDatabaseName(database); err != nil {
-		return nil, 0, err
+		return ListResult{}, err
 	}
 	if err := ValidateCollectionName(collection); err != nil {
-		return nil, 0, err
+		return ListResult{}, err
 	}
 	for field := range filter {
 		if err := ValidateFieldName(field); err != nil {
-			return nil, 0, err
+			return ListResult{}, err
 		}
 	}
 	if sortField != "" {
 		field := strings.TrimPrefix(sortField, "-")
 		if err := ValidateFieldName(field); err != nil {
-			return nil, 0, err
+			return ListResult{}, err
 		}
 	}
 
 	path := filepath.Join(s.root, database+".db")
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, 0, ErrNotFound
+			return ListResult{}, ErrNotFound
 		}
-		return nil, 0, fmt.Errorf("inspect database: %w", err)
+		return ListResult{}, fmt.Errorf("inspect database: %w", err)
 	}
 
 	db, err := s.getDB(database)
 	if err != nil {
-		return nil, 0, err
+		return ListResult{}, err
 	}
 
 	if limit <= 0 {
@@ -59,6 +87,11 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 	documents := []Document{}
 	var total int
 	var matched int
+	stats := QueryStats{SortMode: "none"}
+	if sortField != "" {
+		stats.SortMode = "in_memory"
+	}
+	budget := queryBudget{store: s, stats: &stats}
 
 	err = db.View(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
@@ -76,6 +109,10 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 		if searchQuery != "" {
 			useSearch = true
 			searchIDs = searchFTS(tx, collection, searchQuery)
+			stats.FTSCandidates = len(searchIDs)
+			if err := budget.checkCandidates(len(searchIDs)); err != nil {
+				return err
+			}
 		}
 
 		var indexedField, indexedValue string
@@ -85,6 +122,7 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 				if val, ok := filter[idx]; ok {
 					indexedField = idx
 					indexedValue = encodeIndexValue(val)
+					stats.IndexUsed = idx
 					break
 				}
 			}
@@ -101,6 +139,9 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 				v := b.Get([]byte(k))
 				if v == nil {
 					continue
+				}
+				if err := budget.scan(v); err != nil {
+					return err
 				}
 				plaintext, owned, err := decryptDocumentOwned(v, s.encryptionKey, s.encryptionRequired)
 				if err != nil {
@@ -125,6 +166,9 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 
 				if matches {
 					if sortField != "" || (seen >= offset && len(documents) < limit) {
+						if err := budget.returnDocument(k, plaintext); err != nil {
+							return err
+						}
 						documents = append(documents, Document{
 							ID:       k,
 							Document: stdjson.RawMessage(stableDocumentBytes(plaintext, owned)),
@@ -160,9 +204,15 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 								if v == nil {
 									continue
 								}
+								if err := budget.scan(v); err != nil {
+									return err
+								}
 								plaintext, owned, err := decryptDocumentOwned(v, s.encryptionKey, s.encryptionRequired)
 								if err != nil {
 									return fmt.Errorf("corrupt document (decrypt): %w", err)
+								}
+								if err := budget.returnDocument(string(k), plaintext); err != nil {
+									return err
 								}
 								documents = append(documents, Document{
 									ID:       string(k),
@@ -181,6 +231,9 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 							v := b.Get(k)
 							if v == nil {
 								continue
+							}
+							if err := budget.scan(v); err != nil {
+								return err
 							}
 							plaintext, owned, err := decryptDocumentOwned(v, s.encryptionKey, s.encryptionRequired)
 							if err != nil {
@@ -206,6 +259,9 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 
 							if matches {
 								if sortField != "" || (matched >= offset && len(documents) < limit) {
+									if err := budget.returnDocument(string(k), plaintext); err != nil {
+										return err
+									}
 									documents = append(documents, Document{
 										ID:       string(k),
 										Document: stdjson.RawMessage(stableDocumentBytes(plaintext, owned)),
@@ -231,6 +287,9 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 					}
 				}
 
+				if err := budget.scan(v); err != nil {
+					return err
+				}
 				plaintext, owned, err := decryptDocumentOwned(v, s.encryptionKey, s.encryptionRequired)
 				if err != nil {
 					return fmt.Errorf("corrupt document (decrypt): %w", err)
@@ -254,6 +313,9 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 
 				if matches {
 					if sortField != "" || (matched >= offset && len(documents) < limit) {
+						if err := budget.returnDocument(string(k), plaintext); err != nil {
+							return err
+						}
 						documents = append(documents, Document{
 							ID:       string(k),
 							Document: stdjson.RawMessage(stableDocumentBytes(plaintext, owned)),
@@ -269,9 +331,9 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			return nil, 0, ErrNotFound
+			return ListResult{}, ErrNotFound
 		}
-		return nil, 0, fmt.Errorf("list documents: %w", err)
+		return ListResult{}, fmt.Errorf("list documents: %w", err)
 	}
 
 	// Apply sorting if requested
@@ -283,7 +345,39 @@ func (s *Store) ListDocuments(ctx context.Context, database, collection string, 
 		total = matched
 	}
 
-	return documents, total, nil
+	return ListResult{Documents: documents, Total: total, Stats: stats}, nil
+}
+
+type queryBudget struct {
+	store *Store
+	stats *QueryStats
+}
+
+func (b *queryBudget) scan(data []byte) error {
+	b.stats.ScannedDocuments++
+	b.stats.ScannedBytes += int64(len(data))
+	if b.store.maxQueryScanDocs > 0 && b.stats.ScannedDocuments > b.store.maxQueryScanDocs {
+		return fmt.Errorf("%w: scanned documents exceeded %d", ErrQueryLimitExceeded, b.store.maxQueryScanDocs)
+	}
+	if b.store.maxQueryScanBytes > 0 && b.stats.ScannedBytes > b.store.maxQueryScanBytes {
+		return fmt.Errorf("%w: scanned bytes exceeded %d", ErrQueryLimitExceeded, b.store.maxQueryScanBytes)
+	}
+	return nil
+}
+
+func (b *queryBudget) returnDocument(id string, data []byte) error {
+	b.stats.ReturnedBytes += int64(len(id) + len(data) + 96)
+	if b.store.maxResponseBytes > 0 && b.stats.ReturnedBytes > int64(b.store.maxResponseBytes) {
+		return fmt.Errorf("%w: response bytes exceeded %d", ErrQueryLimitExceeded, b.store.maxResponseBytes)
+	}
+	return nil
+}
+
+func (b *queryBudget) checkCandidates(count int) error {
+	if b.store.maxQueryScanDocs > 0 && count > b.store.maxQueryScanDocs {
+		return fmt.Errorf("%w: fts candidates exceeded %d", ErrQueryLimitExceeded, b.store.maxQueryScanDocs)
+	}
+	return nil
 }
 
 type sortableValue struct {

@@ -94,9 +94,19 @@ docs/ - The documentation part of jsonvault-core, contains integration-guide.md 
 </JSONVault>
 
 <mcp>
-You must use the collect_feedback tool after every task that you do and wait for the user's feedback. The collect_feedback tool is your means of getting feedback from the user, and it will also act as a way to move to the next step. When you get the feedback from the user, you must use it to update the task and proceed to the next step. This is very important, so always use the collect_feedback tool after every task that you do.
+You must use the collect_feedback tool after every task that you do and wait for the user's feedback. The collect_feedback tool is your means of getting feedback from the user, and it will also act as a way to move to the next step. When you get the feedback from the user, you must use it to update the task and proceed to the next step. This is very important, so always use the collect_feedback tool after every task that you do. No matter what, even if user says the task is approved, you should always collect_feedback.
 </mcp>
 
 <current_system_goal>
-You must finish docs/audit/audit-002-plan.md which tracks to the docs/audit/audit-002.md file. Make sure that implementation is good. Collect feedback for P0, P1, etc...
+You must create the dashboard-ui.json located in root to the jsonvault-ui/ directory. Focus on UI first before we start integrating.
 </current_system_goal>
+
+<!-- BEGIN:nextjs-agent-rules -->
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
+<!-- END:nextjs-agent-rules -->
+
+<design>
+Please use tailwind css.
+<design>

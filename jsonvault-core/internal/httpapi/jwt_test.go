@@ -91,12 +91,19 @@ func TestJWTAuthentication(t *testing.T) {
 		t.Fatalf("expected 403 when violating collection scope, got %d", resp5.StatusCode)
 	}
 
-	// 6. Try to list databases with the JWT (should fail 403 because it's not admin scope)
+	// 6. List databases with the JWT (should return only the scoped database)
 	req6, _ := http.NewRequest("GET", server.URL+"/api/v1/databases", nil)
 	req6.Header.Set("Authorization", "Bearer "+token)
 	resp6, _ := http.DefaultClient.Do(req6)
-	if resp6.StatusCode != http.StatusForbidden {
-		t.Fatalf("expected 403 when accessing admin route with read_write JWT, got %d", resp6.StatusCode)
+	if resp6.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 when listing scoped databases, got %d", resp6.StatusCode)
+	}
+	var dbs []string
+	if err := json.NewDecoder(resp6.Body).Decode(&dbs); err != nil {
+		t.Fatalf("decode databases: %v", err)
+	}
+	if len(dbs) != 1 || dbs[0] != "mydb" {
+		t.Fatalf("databases = %v, want [mydb]", dbs)
 	}
 
 	structuralRequests := []struct {

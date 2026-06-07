@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -18,6 +19,14 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "restore" {
+		if err := runRestore(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "restore:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
@@ -29,6 +38,13 @@ func main() {
 
 	db, err := store.NewWithOptions(cfg.DataDir, cfg.CacheEntries, cfg.EncryptionKey, store.Options{
 		EncryptionRequired: cfg.EncryptionRequired,
+		MaxDocumentBytes:   cfg.MaxDocumentBytes,
+		MaxResponseBytes:   cfg.MaxResponseBytes,
+		MaxQueryScanDocs:   cfg.MaxQueryScanDocs,
+		MaxQueryScanBytes:  cfg.MaxQueryScanBytes,
+		MaxQueryDuration:   cfg.MaxQueryDuration,
+		BackupTempDir:      cfg.BackupTempDir,
+		BackupConcurrency:  cfg.BackupConcurrency,
 	})
 	if err != nil {
 		slog.Error("open store", "error", err)
@@ -54,12 +70,21 @@ func main() {
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,
 		IdleTimeout:       cfg.IdleTimeout,
+		MaxHeaderBytes:    cfg.MaxHeaderBytes,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	go db.StartTTLWorker(ctx)
+	if cfg.PprofAddr != "" {
+		go func() {
+			slog.Info("pprof diagnostics listening", "addr", cfg.PprofAddr)
+			if err := http.ListenAndServe(cfg.PprofAddr, nil); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("serve pprof", "error", err)
+			}
+		}()
+	}
 
 	errCh := make(chan error, 1)
 	go func() {

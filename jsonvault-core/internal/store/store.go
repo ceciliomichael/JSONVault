@@ -27,11 +27,26 @@ type Store struct {
 	cacheEntries       int
 	encryptionKey      []byte
 	encryptionRequired bool
+	maxDocumentBytes   int
+	maxResponseBytes   int
+	maxQueryScanDocs   int
+	maxQueryScanBytes  int64
+	maxQueryDuration   time.Duration
+	backupTempDir      string
+	backupConcurrency  int
+	backupFreeSpace    FreeSpaceChecker
+	backupMu           sync.Mutex
+	activeBackups      map[string]struct{}
 	mu                 sync.RWMutex
-	writeMu            sync.Mutex
+	writeLocksMu       sync.Mutex
+	writeLocks         map[string]*sync.Mutex
 	dbs                map[string]*DBHandle
 	schemaMu           sync.RWMutex
 	schemaCache        map[string]cachedSchema
+	statsMu            sync.Mutex
+	statsCache         Stats
+	statsCacheAt       time.Time
+	statsCacheTTL      time.Duration
 
 	subMu       sync.RWMutex
 	subscribers map[string]map[string]map[*Subscription]struct{}
@@ -60,7 +75,27 @@ type TransactionOp struct {
 
 type Options struct {
 	EncryptionRequired bool
+	MaxDocumentBytes   int
+	MaxResponseBytes   int
+	MaxQueryScanDocs   int
+	MaxQueryScanBytes  int64
+	MaxQueryDuration   time.Duration
+	BackupTempDir      string
+	BackupConcurrency  int
+	BackupFreeSpace    FreeSpaceChecker
+	StatsCacheTTL      time.Duration
 }
+
+type FreeSpaceChecker func(path string, requiredBytes int64) error
+
+const (
+	DefaultMaxDocumentBytes  = 10 * 1024 * 1024
+	DefaultMaxResponseBytes  = 32 * 1024 * 1024
+	DefaultMaxQueryScanDocs  = 50000
+	DefaultMaxQueryScanBytes = 128 * 1024 * 1024
+	DefaultBackupConcurrency = 1
+	DefaultStatsCacheTTL     = 15 * time.Second
+)
 
 type Stats struct {
 	OpenDatabases     int
@@ -132,11 +167,23 @@ func NewWithOptions(root string, cacheEntries int, encryptionKey []byte, options
 	if err := os.MkdirAll(absRoot, 0o700); err != nil {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
+	options = normalizeOptions(absRoot, options)
 	s := &Store{
 		root:               absRoot,
 		cacheEntries:       cacheEntries,
 		encryptionKey:      encryptionKey,
 		encryptionRequired: options.EncryptionRequired,
+		maxDocumentBytes:   options.MaxDocumentBytes,
+		maxResponseBytes:   options.MaxResponseBytes,
+		maxQueryScanDocs:   options.MaxQueryScanDocs,
+		maxQueryScanBytes:  options.MaxQueryScanBytes,
+		maxQueryDuration:   options.MaxQueryDuration,
+		backupTempDir:      options.BackupTempDir,
+		backupConcurrency:  options.BackupConcurrency,
+		backupFreeSpace:    options.BackupFreeSpace,
+		statsCacheTTL:      options.StatsCacheTTL,
+		activeBackups:      make(map[string]struct{}),
+		writeLocks:         make(map[string]*sync.Mutex),
 		dbs:                make(map[string]*DBHandle),
 		schemaCache:        make(map[string]cachedSchema),
 		webhookQueue:       make(chan Event, 1024),
@@ -148,6 +195,54 @@ func NewWithOptions(root string, cacheEntries int, encryptionKey []byte, options
 		go s.webhookWorker()
 	}
 	return s, nil
+}
+
+func normalizeOptions(root string, options Options) Options {
+	if options.MaxDocumentBytes < 1 {
+		options.MaxDocumentBytes = DefaultMaxDocumentBytes
+	}
+	if options.MaxResponseBytes < 1 {
+		options.MaxResponseBytes = DefaultMaxResponseBytes
+	}
+	if options.MaxQueryScanDocs < 1 {
+		options.MaxQueryScanDocs = DefaultMaxQueryScanDocs
+	}
+	if options.MaxQueryScanBytes < 1 {
+		options.MaxQueryScanBytes = DefaultMaxQueryScanBytes
+	}
+	if options.BackupTempDir == "" {
+		options.BackupTempDir = filepath.Join(root, "_tmp", "backups")
+	}
+	if options.BackupConcurrency < 1 {
+		options.BackupConcurrency = DefaultBackupConcurrency
+	}
+	if options.BackupFreeSpace == nil {
+		options.BackupFreeSpace = checkFreeSpace
+	}
+	if options.StatsCacheTTL <= 0 {
+		options.StatsCacheTTL = DefaultStatsCacheTTL
+	}
+	return options
+}
+
+func (s *Store) enforceDocumentSize(data []byte) error {
+	if s.maxDocumentBytes > 0 && len(data) > s.maxDocumentBytes {
+		return fmt.Errorf("%w: %d bytes > %d bytes", ErrDocumentTooLarge, len(data), s.maxDocumentBytes)
+	}
+	return nil
+}
+
+func (s *Store) lockDatabaseWrite(database string) func() {
+	s.writeLocksMu.Lock()
+	lock := s.writeLocks[database]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		s.writeLocks[database] = lock
+	}
+	s.writeLocksMu.Unlock()
+
+	lock.Lock()
+	return lock.Unlock
 }
 
 func (s *Store) StartTTLWorker(ctx context.Context) {
@@ -167,23 +262,24 @@ func (s *Store) StartTTLWorker(ctx context.Context) {
 }
 
 func (s *Store) purgeExpiredDocuments() error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-
-	s.mu.RLock()
-	dbNames := make(map[string]*DBHandle)
-	for name, h := range s.dbs {
-		dbNames[name] = h
+	dbNames, err := s.ListDatabases()
+	if err != nil {
+		return err
 	}
-	s.mu.RUnlock()
 
 	nowUnix := uint64(time.Now().Unix())
 	var errs []string
 
-	for dbName, h := range dbNames {
+	for _, dbName := range dbNames {
+		h, err := s.getDB(dbName)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", dbName, err))
+			continue
+		}
 		var events []Event
 
-		err := h.Update(func(tx *bolt.Tx) error {
+		unlock := s.lockDatabaseWrite(dbName)
+		err = h.Update(func(tx *bolt.Tx) error {
 			ttlBucket := tx.Bucket(ttlIndexBucketKey())
 			if ttlBucket == nil {
 				return nil
@@ -227,12 +323,16 @@ func (s *Store) purgeExpiredDocuments() error {
 						if err := b.Delete([]byte(id)); err != nil {
 							return err
 						}
-						events = append(events, Event{
+						event, err := recordEventTx(tx, Event{
 							Action:     "delete",
 							Database:   dbName,
 							Collection: collection,
 							DocumentID: id,
 						})
+						if err != nil {
+							return err
+						}
+						events = append(events, event)
 					}
 				}
 				if err := deleteTTLDocEntryTx(tx, collection, id); err != nil {
@@ -244,6 +344,7 @@ func (s *Store) purgeExpiredDocuments() error {
 			}
 			return nil
 		})
+		unlock()
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", dbName, err))
 			continue
@@ -361,17 +462,56 @@ func (s *Store) getDB(database string) (*DBHandle, error) {
 		evictHandle.gate.Unlock()
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if h, ok := s.dbs[database]; ok {
-		h.mu.Lock()
-		defer h.mu.Unlock()
-		if h.state == stateDeleting {
-			return nil, ErrNotFound
+	for {
+		s.mu.Lock()
+		if h, ok := s.dbs[database]; ok {
+			h.mu.Lock()
+			if h.state == stateDeleting {
+				h.mu.Unlock()
+				s.mu.Unlock()
+				return nil, ErrNotFound
+			}
+			h.lastUsed = time.Now()
+			h.mu.Unlock()
+			s.mu.Unlock()
+			return h, nil
 		}
-		h.lastUsed = time.Now()
-		return h, nil
+		if s.cacheEntries <= 0 || len(s.dbs) < s.cacheEntries {
+			break
+		}
+
+		var oldest string
+		var oldestTime time.Time
+		for name, handle := range s.dbs {
+			handle.mu.RLock()
+			t := handle.lastUsed
+			handle.mu.RUnlock()
+			if oldest == "" || t.Before(oldestTime) {
+				oldest = name
+				oldestTime = t
+			}
+		}
+		if oldest == "" {
+			break
+		}
+		evictName := oldest
+		evictHandle := s.dbs[oldest]
+		delete(s.dbs, oldest)
+		evictHandle.mu.Lock()
+		evictHandle.state = stateDeleting
+		evictHandle.mu.Unlock()
+		s.mu.Unlock()
+
+		evictHandle.gate.Lock()
+		if evictHandle.db != nil {
+			if err := evictHandle.db.Close(); err != nil {
+				evictHandle.gate.Unlock()
+				return nil, fmt.Errorf("evict database %s: %w", evictName, err)
+			}
+		}
+		evictHandle.gate.Unlock()
 	}
+	defer s.mu.Unlock()
 
 	path := filepath.Join(s.root, database+".db")
 
@@ -438,6 +578,14 @@ func (s *Store) Stats() Stats {
 		stats.WebhookQueueDepth = len(s.webhookQueue)
 	}
 
+	s.statsMu.Lock()
+	if time.Since(s.statsCacheAt) < s.statsCacheTTL {
+		stats.DataBytes = s.statsCache.DataBytes
+		s.statsMu.Unlock()
+		return stats
+	}
+	s.statsMu.Unlock()
+
 	_ = filepath.WalkDir(s.root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".db") {
 			return nil
@@ -448,6 +596,11 @@ func (s *Store) Stats() Stats {
 		}
 		return nil
 	})
+
+	s.statsMu.Lock()
+	s.statsCache.DataBytes = stats.DataBytes
+	s.statsCacheAt = time.Now()
+	s.statsMu.Unlock()
 
 	return stats
 }
@@ -461,8 +614,15 @@ func (s *Store) BackupDatabase(ctx context.Context, database string, w io.Writer
 		return err
 	}
 
+	release, err := s.beginBackup(database)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	path := filepath.Join(s.root, database+".db")
-	if _, err := os.Stat(path); err != nil {
+	info, err := os.Stat(path)
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ErrNotFound
 		}
@@ -474,7 +634,14 @@ func (s *Store) BackupDatabase(ctx context.Context, database string, w io.Writer
 		return err
 	}
 
-	tmp, err := os.CreateTemp("", "jsonvault-backup-*.db")
+	if err := os.MkdirAll(s.backupTempDir, 0o700); err != nil {
+		return fmt.Errorf("create backup temp directory: %w", err)
+	}
+	if err := s.backupFreeSpace(s.backupTempDir, backupRequiredBytes(info.Size())); err != nil {
+		return err
+	}
+
+	tmp, err := os.CreateTemp(s.backupTempDir, "jsonvault-backup-*.db")
 	if err != nil {
 		return fmt.Errorf("create backup snapshot: %w", err)
 	}
@@ -496,4 +663,29 @@ func (s *Store) BackupDatabase(ctx context.Context, database string, w io.Writer
 	}
 	_, err = io.Copy(contextWriter{ctx: ctx, w: w}, tmp)
 	return err
+}
+
+func (s *Store) beginBackup(database string) (func(), error) {
+	s.backupMu.Lock()
+	defer s.backupMu.Unlock()
+	if _, ok := s.activeBackups[database]; ok {
+		return nil, fmt.Errorf("%w: %s", ErrBackupInProgress, database)
+	}
+	if s.backupConcurrency > 0 && len(s.activeBackups) >= s.backupConcurrency {
+		return nil, fmt.Errorf("%w: maximum concurrent backups is %d", ErrBackupInProgress, s.backupConcurrency)
+	}
+	s.activeBackups[database] = struct{}{}
+	return func() {
+		s.backupMu.Lock()
+		delete(s.activeBackups, database)
+		s.backupMu.Unlock()
+	}, nil
+}
+
+func backupRequiredBytes(databaseSize int64) int64 {
+	const margin = 16 * 1024 * 1024
+	if databaseSize < 0 {
+		databaseSize = 0
+	}
+	return databaseSize + margin
 }

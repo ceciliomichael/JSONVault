@@ -1,0 +1,819 @@
+{
+  "name": "JSONVault Dashboard UI Guide",
+  "version": "1.1.0",
+  "status": "active_design_contract",
+  "purpose": "Define the dashboard product scope, UX rules, visual language, safety constraints, and implementation guardrails for jsonvault-ui.",
+  "source_of_truth": {
+    "core_project": "../jsonvault-core",
+    "ui_project": "./",
+    "docs": [
+      "../docs/integration-guide.md",
+      "../docs/admin-guide.md",
+      "../docs/operations.md"
+    ],
+    "rule": "When this file disagrees with jsonvault-core behavior or the docs, core and docs win. Update this guide after the API contract changes."
+  },
+  "product_direction": {
+    "category": "developer database dashboard",
+    "inspiration": ["Supabase", "Firebase Console", "PlanetScale", "Vercel"],
+    "must_not_copy": "Do not clone another product's brand, exact layout, icon set decisions, or component styling.",
+    "desired_feel": [
+      "quiet",
+      "technical",
+      "trustworthy",
+      "fast",
+      "scannable",
+      "developer-first",
+      "production-grade"
+    ],
+    "avoid_feel": [
+      "marketing landing page",
+      "gradient-heavy SaaS hero",
+      "decorative dashboard mockup",
+      "fake analytics",
+      "playful UI that reduces clarity",
+      "one-note color theme"
+    ]
+  },
+  "core_product_model": {
+    "database_hierarchy": ["database", "collection", "document"],
+    "database_type": "NoSQL JSON document database",
+    "important_core_behaviors": [
+      "Databases and collections can be lazily created by writes when the token allows the path.",
+      "Documents support ETags for optimistic concurrency.",
+      "List requests support limit, offset, filter, sort, and search query parameters.",
+      "SSE streams document changes for realtime app features.",
+      "Transient publish broadcasts events without persisting them for replay.",
+      "Indexes and FTS configuration can run as background operations.",
+      "Webhook delivery is protected by SSRF checks and delivery records.",
+      "Admin/root operations are separate from project and runtime operations."
+    ]
+  },
+  "realtime_model": {
+    "plain_language": "JSONVault realtime uses Server-Sent Events. A client opens one long-lived HTTP connection to a collection, and JSONVault streams document change events over that connection as inserts, updates, and deletes happen.",
+    "main_flow": [
+      "The app authenticates with a token that can read the target database and collection.",
+      "The app opens GET /api/v1/{database}/{collection}/subscribe.",
+      "JSONVault keeps the HTTP response open as text/event-stream.",
+      "When a document is inserted, updated, or deleted, JSONVault writes an SSE event to subscribed clients.",
+      "Each committed document event includes a sequence ID. Clients save the latest sequence they processed.",
+      "If the connection drops, the client reconnects with Last-Event-ID or last_event_id to replay retained committed document events.",
+      "JSONVault also sends keepalive comments so proxies are less likely to close idle streams."
+    ],
+    "event_types": {
+      "insert": "A new document was created and the event includes document data and ETag.",
+      "update": "An existing document changed and the event includes the latest document data and ETag.",
+      "delete": "A document was deleted and the event includes the document ID.",
+      "transient_publish": "A temporary JSON message broadcast to active subscribers. It is not saved and cannot be replayed."
+    },
+    "related_endpoints": {
+      "subscribe": "GET /api/v1/{database}/{collection}/subscribe",
+      "presence": "GET /api/v1/{database}/{collection}/presence",
+      "publish": "POST /api/v1/{database}/{collection}/publish"
+    },
+    "dashboard_purpose": [
+      "Show developers what their app will receive from live subscriptions.",
+      "Let developers confirm document changes arrive without polling.",
+      "Show active listener count through presence.",
+      "Let developers send a temporary test event while building live UI."
+    ],
+    "browser_auth_note": "Native browser EventSource cannot set custom Authorization headers. If JSONVault requires Bearer auth for subscribe requests, jsonvault-ui should use a fetch-based SSE client or a trusted backend proxy instead of putting secrets in query strings.",
+    "what_it_is_not": [
+      "It is not a replacement for stored documents.",
+      "It is not a durable message queue.",
+      "Transient publish events are not replayed after reconnect.",
+      "It should not be shown as connected unless the UI has a real open stream."
+    ]
+  },
+  "audiences": {
+    "app_developer": {
+      "description": "Builds application code that talks to JSONVault with read_only or read_write runtime keys.",
+      "primary_needs": [
+        "browse documents",
+        "test filters and search",
+        "copy safe API examples",
+        "understand token scope",
+        "debug query and validation errors",
+        "test realtime subscriptions"
+      ],
+      "must_not_receive": [
+        "JSONVAULT_ADMIN_KEY",
+        "JSONVAULT_JWT_SECRET",
+        "server environment variables",
+        "root server configuration controls"
+      ]
+    },
+    "project_owner": {
+      "description": "Manages one database/project through a project_admin token or equivalent trusted dashboard backend session.",
+      "primary_needs": [
+        "manage collections",
+        "manage indexes",
+        "configure FTS fields",
+        "manage schemas",
+        "configure webhooks",
+        "view operation status",
+        "mint scoped runtime keys when permitted"
+      ]
+    },
+    "host_operator": {
+      "description": "Runs the JSONVault server and can perform root server operations.",
+      "primary_needs": [
+        "check server health",
+        "view metrics",
+        "create and delete databases",
+        "generate project keys",
+        "revoke keys",
+        "run backups",
+        "inspect webhook deliveries"
+      ],
+      "must_keep_private": [
+        "JSONVAULT_ADMIN_KEY",
+        "JSONVAULT_JWT_SECRET",
+        "encryption keys",
+        "server data paths"
+      ]
+    }
+  },
+  "authority_model": {
+    "runtime_keys": {
+      "read_only": "Read documents and safe metadata within database and collection constraints.",
+      "read_write": "Read and write documents, use transactions, subscribe to realtime, read presence, and publish transient messages within constraints.",
+      "rules": [
+        "Runtime keys are the only keys suitable for normal app clients.",
+        "Runtime keys must not expose management actions such as index builds, FTS rebuilds, schema mutation, webhook configuration, backup, or key minting."
+      ]
+    },
+    "project_management": {
+      "scope": "project_admin",
+      "capabilities": [
+        "metadata:read",
+        "documents:read",
+        "documents:write",
+        "indexes:manage",
+        "fts:manage",
+        "schemas:manage",
+        "webhooks:manage",
+        "collections:manage",
+        "operations:read",
+        "operations:cancel",
+        "keys:manage"
+      ],
+      "rules": [
+        "Project management tokens are for trusted dashboard, backend, or CLI workflows.",
+        "Do not place project management tokens in ordinary browser or mobile app runtime code.",
+        "The UI must drive visible actions from the token capabilities returned by GET /api/v1/me."
+      ]
+    },
+    "root_admin": {
+      "credential": "JSONVAULT_ADMIN_KEY",
+      "rules": [
+        "Root admin controls server-wide operations.",
+        "Never expose the root admin key to normal project users or runtime app code.",
+        "Admin-only UI must be visually and structurally separated from project screens."
+      ],
+      "admin_only_features": [
+        "server health beyond public /healthz",
+        "Prometheus metrics",
+        "server-wide database list/create/delete",
+        "raw database backup",
+        "root key generation",
+        "key revocation",
+        "global webhook delivery inspection and retry"
+      ]
+    }
+  },
+  "dashboard_layer_scope": {
+    "human_auth": {
+      "status": "dashboard-layer feature, not jsonvault-core account API",
+      "allowed_features": [
+        "login",
+        "registration",
+        "forgot password",
+        "session management",
+        "logout",
+        "project onboarding",
+        "connect existing JSONVault server"
+      ],
+      "rules": [
+        "Keep dashboard user sessions separate from JSONVault API tokens.",
+        "Do not ask normal users for JSONVAULT_JWT_SECRET or encryption keys.",
+        "Only self-hosted operator setup may ask for a root admin key, and it must be masked and treated as a secret."
+      ]
+    },
+    "credential_storage": {
+      "rules": [
+        "Generated JWTs should be shown once with copy actions, then redacted.",
+        "Store dashboard session state separately from runtime and management credentials.",
+        "Never store JSONVAULT_JWT_SECRET in browser-accessible state.",
+        "Never log secret tokens or admin keys."
+      ]
+    }
+  },
+  "visual_language": {
+    "style": "clean technical console",
+    "density": "medium-dense, optimized for repeated developer work",
+    "layout": {
+      "desktop": "Fixed sidebar, top project/database context, main work area, optional right details panel.",
+      "tablet": "Sidebar may collapse; secondary panels become drawers.",
+      "mobile": "Prioritize browse, inspect, and essential edit flows. Use full-screen JSON editing when needed."
+    },
+    "gradients": {
+      "rule": "Do not use gradient backgrounds, gradient blobs, gradient orbs, bokeh, or purple-blue gradient hero sections.",
+      "allowed_exception": "A small semantic status accent may use a flat tint. Avoid decorative gradients entirely."
+    },
+    "cards": {
+      "allowed_for": [
+        "metric summaries",
+        "repeated resource rows",
+        "empty states",
+        "dialogs",
+        "settings groups"
+      ],
+      "border_radius": "6px to 8px",
+      "rules": [
+        "Do not put cards inside cards.",
+        "Do not style page sections as floating decorative cards.",
+        "Prefer tables, panels, split views, and drawers for dashboard work."
+      ]
+    },
+    "color_palette": {
+      "base_light": {
+        "background": "#F8FAFC",
+        "surface": "#FFFFFF",
+        "surface_subtle": "#F1F5F9",
+        "border": "#D8DEE8",
+        "text": "#111827",
+        "text_muted": "#64748B"
+      },
+      "base_dark": {
+        "background": "#111111",
+        "surface": "#161616",
+        "surface_subtle": "#1F1F1F",
+        "border": "#2A2A2A",
+        "text": "#F4F4F5",
+        "text_muted": "#A1A1AA"
+      },
+      "accent": {
+        "primary": "#16A34A",
+        "primary_hover": "#15803D",
+        "primary_soft": "#DCFCE7"
+      },
+      "semantic": {
+        "info": "#2563EB",
+        "success": "#16A34A",
+        "warning": "#D97706",
+        "danger": "#DC2626",
+        "neutral": "#475569"
+      },
+      "rules": [
+        "Use green as a restrained database/action accent, not as a full-page theme.",
+        "Use semantic colors only for semantic meaning.",
+        "Avoid palettes dominated by purple, beige, dark slate, brown, orange, or espresso tones."
+      ]
+    },
+    "typography": {
+      "sans_stack": "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+      "mono_stack": "JetBrains Mono, SFMono-Regular, Consolas, Liberation Mono, monospace",
+      "rules": [
+        "Use compact headings inside dashboard panels.",
+        "Use monospace for IDs, routes, ETags, JWT IDs, JSON, errors, and code.",
+        "Do not scale font size with viewport width.",
+        "Letter spacing should be 0 except slight positive tracking on all-caps micro labels."
+      ]
+    },
+    "icons": {
+      "library": "lucide",
+      "rules": [
+        "Use lucide icons for common actions when available.",
+        "Icon-only buttons need tooltips and accessible labels.",
+        "Do not hand-draw SVG icons when a standard icon exists."
+      ]
+    }
+  },
+  "navigation": {
+    "pre_authenticated_routes": [
+      "Login",
+      "Register",
+      "Forgot Password",
+      "Connect Server",
+      "Create Project"
+    ],
+    "primary_sections": [
+      "Overview",
+      "Documents",
+      "Collections",
+      "Indexes",
+      "Search",
+      "Schemas",
+      "Webhooks",
+      "Operations",
+      "API Keys",
+      "Realtime",
+      "Admin"
+    ],
+    "visibility_rules": {
+      "Overview": "Visible when the dashboard has a valid project context.",
+      "Documents": "Visible when documents:read is present or the scope is read_only, read_write, project_admin, or admin.",
+      "Collections": "Visible when metadata:read, collections:manage, project_admin, or admin is present.",
+      "Indexes": "Visible when metadata:read, indexes:manage, project_admin, or admin is present.",
+      "Search": "Visible when metadata:read, fts:manage, project_admin, or admin is present.",
+      "Schemas": "Visible when metadata:read, schemas:manage, project_admin, or admin is present.",
+      "Webhooks": "Visible when webhooks:manage, project_admin, or admin is present.",
+      "Operations": "Visible when operations:read, project_admin, or admin is present.",
+      "API Keys": "Visible when keys:manage or root admin is present.",
+      "Realtime": "Visible when document read access is present.",
+      "Admin": "Visible only for root admin features."
+    },
+    "global_controls": [
+      "database selector",
+      "collection selector where relevant",
+      "current token scope badge",
+      "capabilities popover",
+      "API base URL display",
+      "refresh action",
+      "theme control",
+      "logout"
+    ]
+  },
+  "core_supported_features": {
+    "identity": ["GET /api/v1/me"],
+    "documents": [
+      "GET /api/v1/{database}/{collection}",
+      "POST /api/v1/{database}/{collection}",
+      "GET /api/v1/{database}/{collection}/{id}",
+      "PUT /api/v1/{database}/{collection}/{id}",
+      "PATCH /api/v1/{database}/{collection}/{id}",
+      "DELETE /api/v1/{database}/{collection}/{id}"
+    ],
+    "querying": [
+      "limit",
+      "offset",
+      "sort",
+      "filter[field]",
+      "search",
+      "X-Total-Count",
+      "X-Limit",
+      "X-Offset",
+      "query_limit_exceeded recovery guidance"
+    ],
+    "realtime": [
+      "GET /api/v1/{database}/{collection}/subscribe",
+      "Last-Event-ID replay for retained committed document events",
+      "POST /api/v1/{database}/{collection}/publish",
+      "GET /api/v1/{database}/{collection}/presence"
+    ],
+    "transactions": ["POST /api/v1/{database}/transactions"],
+    "collections": [
+      "GET /api/v1/{database}/collections",
+      "POST /api/v1/{database}/collections",
+      "DELETE /api/v1/{database}/collections/{collection}"
+    ],
+    "indexes": [
+      "GET /api/v1/{database}/{collection}/indexes",
+      "POST /api/v1/{database}/{collection}/indexes",
+      "DELETE /api/v1/{database}/{collection}/indexes/{field}",
+      "async index create operations"
+    ],
+    "fts": [
+      "GET /api/v1/{database}/{collection}/fts",
+      "PUT /api/v1/{database}/{collection}/fts",
+      "async FTS configure operations"
+    ],
+    "schemas": [
+      "GET /api/v1/{database}/{collection}/schema",
+      "PUT /api/v1/{database}/{collection}/schema",
+      "DELETE /api/v1/{database}/{collection}/schema"
+    ],
+    "webhooks": [
+      "GET /api/v1/{database}/{collection}/webhooks",
+      "PUT /api/v1/{database}/{collection}/webhooks",
+      "GET /api/v1/admin/webhooks/{database}/deliveries",
+      "POST /api/v1/admin/webhooks/{database}/deliveries/{sequence}/retry"
+    ],
+    "operations": [
+      "GET /api/v1/operations",
+      "GET /api/v1/operations/{operation_id}",
+      "POST /api/v1/operations/{operation_id}/cancel"
+    ],
+    "admin": [
+      "GET /healthz",
+      "GET /metrics",
+      "GET /api/v1/databases",
+      "POST /api/v1/databases",
+      "DELETE /api/v1/databases/{database}",
+      "GET /api/v1/admin/backup/{database}",
+      "POST /api/v1/admin/keys",
+      "DELETE /api/v1/admin/keys/{jti}"
+    ]
+  },
+  "unsupported_or_out_of_scope": [
+    "editing server environment variables from the dashboard",
+    "online restore upload from the dashboard",
+    "persistent operation history across server restart",
+    "persistent audit history across server restart unless core adds it",
+    "schema dry-run against all existing documents",
+    "webhook secret rotation endpoint unless core adds it",
+    "webhook test delivery endpoint unless core adds it",
+    "cursor pagination unless core adds it",
+    "visual query planner with guaranteed index recommendations",
+    "billing and plan management",
+    "team invitations unless implemented by a dashboard auth layer",
+    "normal-user account registration inside jsonvault-core"
+  ],
+  "screen_specs": {
+    "login": {
+      "purpose": "Authenticate a human user into the dashboard app.",
+      "content": [
+        "email",
+        "password",
+        "submit",
+        "forgot password link",
+        "registration link",
+        "server or workspace context when applicable"
+      ],
+      "rules": [
+        "Use a plain auth panel.",
+        "Do not use a marketing hero or gradient background.",
+        "Do not mention the root admin key in normal login."
+      ]
+    },
+    "register": {
+      "purpose": "Create a dashboard user account when the dashboard auth layer supports it.",
+      "content": ["minimum identity fields", "email", "password", "login link"],
+      "next_step": "Send the user to project onboarding or server connection.",
+      "rules": [
+        "Do not ask for JSONVAULT_JWT_SECRET.",
+        "Do not ask for encryption keys.",
+        "Do not ask for root admin key in normal registration."
+      ]
+    },
+    "connect_server": {
+      "purpose": "Connect jsonvault-ui or its backend to a JSONVault core server.",
+      "content": [
+        "API base URL",
+        "connection test",
+        "operator-only root admin key input when self-hosted",
+        "health result"
+      ],
+      "rules": [
+        "Mask root admin key input.",
+        "Explain operator-only scope.",
+        "Never reveal the saved key."
+      ]
+    },
+    "overview": {
+      "purpose": "Summarize the selected database/project status without fake metrics.",
+      "content": [
+        "current scope",
+        "capabilities",
+        "database context",
+        "collection count when available",
+        "recent operation status when available",
+        "safe quick actions"
+      ],
+      "empty_state": "Show setup actions based on actual capabilities."
+    },
+    "documents": {
+      "purpose": "Browse, inspect, create, edit, and delete JSON documents safely.",
+      "layout": [
+        "collection context",
+        "query toolbar",
+        "document table",
+        "JSON detail drawer",
+        "JSON editor modal or drawer"
+      ],
+      "controls": [
+        "search",
+        "filters",
+        "sort",
+        "limit",
+        "offset",
+        "refresh",
+        "create document",
+        "edit document",
+        "delete document",
+        "copy ID",
+        "copy ETag"
+      ],
+      "safety": [
+        "Show ETag on edit.",
+        "Use If-Match for updates and deletes when an ETag is available.",
+        "Validate JSON before submit.",
+        "Display query_limit_exceeded recovery advice.",
+        "Do not silently coerce invalid JSON."
+      ]
+    },
+    "collections": {
+      "purpose": "List and manage document namespaces.",
+      "content": [
+        "collection list",
+        "create collection",
+        "delete collection",
+        "document count when available"
+      ],
+      "safety": [
+        "Delete requires confirmation.",
+        "Explain that collection names are API path segments.",
+        "Respect collections:manage."
+      ]
+    },
+    "indexes": {
+      "purpose": "Make common exact-match filters faster.",
+      "content": [
+        "index list",
+        "field name",
+        "state",
+        "create index",
+        "delete index",
+        "background operation link"
+      ],
+      "guidance": [
+        "Explain that indexes help repeated filters.",
+        "Warn that builds may run in the background.",
+        "Do not imply every query needs an index."
+      ]
+    },
+    "search": {
+      "purpose": "Configure and test full-text searchable fields.",
+      "content": [
+        "configured fields",
+        "field editor",
+        "save FTS fields",
+        "background operation link",
+        "test search"
+      ],
+      "guidance": [
+        "Explain that broad terms can hit query budgets.",
+        "Show empty state when no FTS fields are configured.",
+        "Respect fts:manage."
+      ]
+    },
+    "schemas": {
+      "purpose": "Validate and enforce document shape with JSON Schema.",
+      "content": [
+        "current schema",
+        "JSON Schema editor",
+        "validate",
+        "save schema",
+        "delete schema"
+      ],
+      "safety": [
+        "Validate before save.",
+        "Warn that schema changes affect future writes.",
+        "Show schema_validation_failed examples."
+      ]
+    },
+    "webhooks": {
+      "purpose": "Configure outbound event integrations for document changes.",
+      "content": [
+        "target URLs",
+        "events to send",
+        "secret returned once warning",
+        "delivery records",
+        "retry failed delivery"
+      ],
+      "safety": [
+        "Warn that localhost, private IPs, and redirects are blocked by SSRF protection.",
+        "Do not reveal old webhook secrets.",
+        "Show delivery status and retry results clearly."
+      ]
+    },
+    "operations": {
+      "purpose": "Track background and management work.",
+      "content": [
+        "operation ID",
+        "type",
+        "database",
+        "collection",
+        "state",
+        "progress",
+        "actor",
+        "timestamps",
+        "last error",
+        "cancel action when supported"
+      ],
+      "rules": [
+        "Poll with backoff.",
+        "Do not claim completion until the API reports completion.",
+        "Explain temporary operation history if applicable."
+      ]
+    },
+    "api_keys": {
+      "purpose": "Create safe runtime keys and trusted project keys when permitted.",
+      "content": [
+        "key type",
+        "scope",
+        "database constraint",
+        "collection constraint",
+        "capability selector when allowed",
+        "expiry",
+        "create",
+        "copy once"
+      ],
+      "key_types": {
+        "read_only": "For read-only app usage.",
+        "read_write": "For runtime app CRUD, transactions, realtime, and publish.",
+        "project_admin": "For trusted dashboard, backend, or CLI management workflows only."
+      },
+      "safety": [
+        "Show generated token once.",
+        "Redact after closing the dialog.",
+        "Do not show JWT signing secret.",
+        "Do not suggest putting project_admin keys in app clients."
+      ]
+    },
+    "realtime": {
+      "purpose": "Help developers verify what app clients receive from live document subscriptions.",
+      "use_cases": [
+        "confirm inserts, updates, and deletes arrive without polling",
+        "test reconnect and Last-Event-ID replay behavior",
+        "inspect active subscriber count",
+        "send temporary development events with publish"
+      ],
+      "rules": [
+        "Label this as a developer testing/debugging tool.",
+        "Explain that transient publish events are not stored for replay.",
+        "Do not present fake connected state as a real server connection."
+      ]
+    },
+    "admin": {
+      "purpose": "Host/operator-only server controls.",
+      "content": [
+        "health",
+        "metrics",
+        "database list",
+        "create database",
+        "delete database",
+        "backup",
+        "root key actions",
+        "delivery inspection"
+      ],
+      "safety": [
+        "Hide unless root admin is active.",
+        "Confirm destructive database actions.",
+        "Explain backups are admin-only.",
+        "Never expose root admin key after entry."
+      ]
+    }
+  },
+  "interaction_rules": {
+    "tables": [
+      "Use sticky headers for data-heavy pages.",
+      "Keep row height compact but readable.",
+      "Provide clear loading, empty, error, and permission-denied states.",
+      "Keep row actions stable so hover states do not resize rows.",
+      "Use horizontal scroll for wide data instead of squeezing text into unreadable cells."
+    ],
+    "forms": [
+      "Every input needs an accessible label.",
+      "Validate field names and JSON before submit when possible.",
+      "Disable submit while requests are in flight.",
+      "Show exact API error code and recovery guidance.",
+      "Use literal primary action labels such as Create index, Save schema, Retry delivery, and Create key."
+    ],
+    "json_editors": [
+      "Use monospace.",
+      "Validate JSON before submit.",
+      "Show line and column parse errors when possible.",
+      "Provide format, copy, and reset actions where useful.",
+      "Never silently coerce invalid JSON."
+    ],
+    "dangerous_actions": [
+      "Require confirmation.",
+      "Show exact target name.",
+      "Use typed confirmation for database and collection deletion.",
+      "Use restrained danger styling.",
+      "Never silently retry destructive operations."
+    ],
+    "permission_denied": [
+      "Disable unavailable actions with a tooltip or helper text naming the missing capability.",
+      "Show the current token scope and capabilities.",
+      "Do not recommend root admin keys for normal app code.",
+      "Keep explanatory content visible when it helps users understand what access is missing."
+    ],
+    "secrets": [
+      "Mask by default.",
+      "Provide copy-once flows for generated tokens and webhook secrets.",
+      "Never show old secrets after the dialog closes.",
+      "Never include secrets in URLs, logs, screenshots, or persisted UI debug data."
+    ]
+  },
+  "content_style": {
+    "voice": "direct, calm, precise",
+    "rules": [
+      "Use exact product terms: database, collection, document, ETag, index, FTS, schema, webhook, operation, capability.",
+      "Avoid internal placeholder text such as mock, fixture, demo, or localhost backup names in user-facing dropdowns.",
+      "Use helper text only where it prevents mistakes.",
+      "Prefer recovery advice over generic failure text.",
+      "Do not use marketing copy inside the dashboard."
+    ],
+    "preferred_labels": {
+      "data_page": "Documents",
+      "fts_page": "Search",
+      "operations_page": "Operations",
+      "api_keys_page": "API Keys",
+      "webhook_config_tab": "Targets",
+      "webhook_delivery_tab": "Deliveries",
+      "realtime_subscribe": "Start listening",
+      "realtime_disconnect": "Stop listening"
+    },
+    "error_copy_examples": {
+      "query_limit_exceeded": "This query hit a server safety limit. Lower the page size, narrow the filter, avoid deep offset, or create an index for the filtered field.",
+      "missing_capability": "This token cannot manage indexes. Required capability: indexes:manage.",
+      "schema_validation_failed": "This document does not match the collection schema. Fix the highlighted fields or update the schema.",
+      "webhook_blocked": "This webhook target is blocked by SSRF protection. Use a public HTTPS endpoint.",
+      "etag_mismatch": "This document changed since you loaded it. Refresh the document and apply your changes again."
+    }
+  },
+  "accessibility": {
+    "requirements": [
+      "All controls must be reachable by keyboard.",
+      "All form inputs must have labels.",
+      "Icon-only buttons must have accessible labels and tooltips.",
+      "Color must not be the only indicator of status.",
+      "Text contrast should meet WCAG AA.",
+      "Dialogs must trap focus and return focus to the trigger.",
+      "Tables need clear headers and screen-reader labels for row actions.",
+      "Static elements must not be used as buttons."
+    ]
+  },
+  "responsive_behavior": {
+    "desktop": "Use sidebar plus main workspace and optional details drawer.",
+    "tablet": "Collapse secondary panels into drawers and keep tables horizontally scrollable.",
+    "mobile": "Prioritize read and inspect flows. Editing JSON should use a full-screen editor.",
+    "minimum_width_rule": "No text or controls should overlap. Toolbars must wrap or move secondary actions into menus."
+  },
+  "performance_rules": {
+    "frontend": [
+      "Virtualize large tables where practical.",
+      "Debounce search and filter input.",
+      "Cancel stale requests when switching database or collection.",
+      "Use optimistic UI only where server consistency is clear.",
+      "Avoid heavy chart libraries unless the metrics screen truly needs them.",
+      "Keep skeletons dimensionally stable to avoid layout shift."
+    ],
+    "api_usage": [
+      "Use conservative limit defaults.",
+      "Show query budget errors with advice.",
+      "Use async management endpoints when available for index and FTS builds.",
+      "Poll operation status with backoff.",
+      "Do not poll realtime data when an SSE subscription is active.",
+      "Preserve ETag headers and send If-Match for edits when available."
+    ]
+  },
+  "implementation_guardrails": {
+    "must_do": [
+      "Read GET /api/v1/me after authentication.",
+      "Drive navigation and enabled actions from scope and capabilities.",
+      "Keep admin-only features separate from project-owner features.",
+      "Store runtime keys and management keys separately in UI state.",
+      "Redact secrets after initial copy opportunities.",
+      "Display exact operation state for async work.",
+      "Map every live control to a real jsonvault-core endpoint or mark it clearly as not connected."
+    ],
+    "must_not_do": [
+      "Do not show controls for unsupported core features as if they work.",
+      "Do not put the root admin key in frontend runtime code.",
+      "Do not use gradients, orbs, decorative blobs, or marketing hero sections.",
+      "Do not show fake charts, fake activity, or fake performance claims as real data.",
+      "Do not silently retry destructive operations.",
+      "Do not claim index or FTS work is complete until the API reports ready.",
+      "Do not leak JWTs, webhook secrets, or admin keys into localStorage unless a deliberate threat model approves it."
+    ]
+  },
+  "quality_checklist": {
+    "visual": [
+      "No gradient-heavy styling.",
+      "Dashboard reads as a calm developer console.",
+      "Text fits buttons, cells, modals, and sidebars at mobile and desktop widths.",
+      "Status colors are semantic and restrained.",
+      "No nested cards or decorative floating sections."
+    ],
+    "product_scope": [
+      "Every visible live feature maps to jsonvault-core endpoints or documented dashboard-layer auth.",
+      "Unsupported follow-ups are not presented as working features.",
+      "Runtime, project management, and root admin credentials are clearly separated.",
+      "Realtime is described as app live-update testing, not a general chat product."
+    ],
+    "safety": [
+      "Dangerous actions require confirmation.",
+      "Missing permissions show the required capability.",
+      "Generated secrets are copied once and then redacted.",
+      "Root admin actions are isolated.",
+      "Webhooks explain SSRF protection."
+    ],
+    "developer_experience": [
+      "Errors show code, message, reason, and recovery advice when available.",
+      "Document editor validates JSON before submit.",
+      "Query UI explains filters, sorting, search, limit, and offset.",
+      "Index and FTS screens explain performance tradeoffs plainly.",
+      "Copy actions are available for IDs, ETags, API paths, tokens, and webhook signing examples."
+    ],
+    "verification": [
+      "JSON guide parses successfully.",
+      "No user-facing text uses internal mock labels.",
+      "Accessibility lint passes for labels and interactive controls.",
+      "Production build succeeds before release."
+    ]
+  }
+}

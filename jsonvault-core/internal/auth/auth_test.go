@@ -72,6 +72,55 @@ func TestGeneratedKeyIncludesLifecycleClaimsAndCanBeRevoked(t *testing.T) {
 	}
 }
 
+func TestProjectAdminCapabilitiesRoundTrip(t *testing.T) {
+	a := New("admin", []byte("secret_signing_key"))
+	key, err := a.GenerateKeyWithMetadata(ScopeProjectAdmin, "project", "*")
+	if err != nil {
+		t.Fatalf("GenerateKeyWithMetadata: %v", err)
+	}
+	ctx, ok := a.AuthenticateContext("Bearer " + key.Token)
+	if !ok {
+		t.Fatal("project admin token should authenticate")
+	}
+	if ctx.Scope != ScopeProjectAdmin {
+		t.Fatalf("scope = %s, want %s", ctx.Scope, ScopeProjectAdmin)
+	}
+	hasIndexes := false
+	for _, capability := range ctx.Capabilities {
+		if capability == CapabilityIndexesManage {
+			hasIndexes = true
+			break
+		}
+	}
+	if !hasIndexes {
+		t.Fatalf("project admin capabilities missing indexes:manage: %#v", ctx.Capabilities)
+	}
+}
+
+func TestSignedAdminJWTDoesNotAuthenticate(t *testing.T) {
+	secret := []byte("secret_signing_key")
+	a := New("admin", secret)
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"scope":      string(ScopeAdmin),
+		"database":   "*",
+		"collection": "*",
+		"iat":        time.Now().Unix(),
+		"nbf":        time.Now().Unix(),
+		"exp":        time.Now().Add(time.Hour).Unix(),
+		"jti":        "signed-admin",
+	})
+	tokenString, err := token.SignedString(secret)
+	if err != nil {
+		t.Fatalf("SignedString: %v", err)
+	}
+
+	ok, _, _, _ := a.Authenticate("Bearer " + tokenString)
+	if ok {
+		t.Fatal("signed admin JWT should not authenticate")
+	}
+}
+
 func TestRevocationFilePersistsRevokedTokenIDs(t *testing.T) {
 	path := t.TempDir() + "/revoked.json"
 	secret := []byte("secret_signing_key")

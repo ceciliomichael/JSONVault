@@ -42,6 +42,14 @@ func (s *Server) handleStoreError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "invalid_name", "message": err.Error()}})
 	case errors.Is(err, store.ErrInvalidJSON), errors.Is(err, store.ErrEmptyDocument):
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "invalid_json", "message": "request body must be a non-empty valid JSON value"}})
+	case errors.Is(err, store.ErrDocumentTooLarge):
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": gin.H{"code": "document_too_large", "message": err.Error()}})
+	case errors.Is(err, store.ErrQueryLimitExceeded):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": gin.H{"code": "query_limit_exceeded", "message": err.Error()}})
+	case errors.Is(err, store.ErrBackupInProgress):
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": gin.H{"code": "backup_in_progress", "message": err.Error()}})
+	case errors.Is(err, store.ErrInsufficientStorage):
+		c.JSON(http.StatusInsufficientStorage, gin.H{"error": gin.H{"code": "insufficient_storage", "message": err.Error()}})
 	case errors.Is(err, store.ErrSchemaValidation):
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "schema_validation_failed", "message": err.Error()}})
 	case errors.Is(err, store.ErrPreconditionFailed):

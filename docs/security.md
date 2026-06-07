@@ -11,7 +11,7 @@ Generate scoped client keys with `POST /api/v1/admin/keys`, or sign them from a 
 - `read_write`: Can read, create, update, patch, delete, transact on documents, and publish transient events within its JWT database/collection constraints. It cannot manage databases, collections, schemas, indexes, FTS config, webhooks, keys, or backups.
 - `read_only`: Can only read databases, collections, and documents. All mutating requests return `403 Forbidden`.
 
-Revoke one generated JWT with `DELETE /api/v1/admin/keys/{jti}`. The main server persists revoked token IDs under `JSONVAULT_DATA_DIR`.
+Revoke one generated JWT with `DELETE /api/v1/admin/keys/{jti}`. The main server persists revoked token IDs under `JSONVAULT_DATA_DIR` with expiry metadata so old revoked IDs can be pruned. Scoped JWTs must include lifecycle claims and cannot exceed the accepted maximum lifetime.
 
 Admin and operational routes are rate-limited per bearer token or client IP. Configure the default with `JSONVAULT_ADMIN_RATE_LIMIT_PER_MINUTE`.
 
@@ -38,3 +38,4 @@ To prevent CPU or Memory exhaustion (OOM), JSONVault enforces strict query limit
 - Max `filter` fields: 5
 
 Additionally, the request body size is capped at `10MB` by default, configurable via `JSONVAULT_MAX_BODY_BYTES`.
+The core store also enforces `JSONVAULT_MAX_DOCUMENT_BYTES`, so internal callers cannot bypass the HTTP body limit. List queries are bounded by response bytes, scanned documents, scanned bytes, and query duration. These defaults can be adjusted directly or through `JSONVAULT_PROFILE=tiny|default|large`.

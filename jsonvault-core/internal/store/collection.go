@@ -23,8 +23,8 @@ func (s *Store) CreateCollection(database, collection string) (bool, error) {
 		return false, err
 	}
 
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	unlock := s.lockDatabaseWrite(database)
+	defer unlock()
 
 	var created bool
 	err = db.Update(func(tx *bolt.Tx) error {
@@ -106,8 +106,8 @@ func (s *Store) DeleteCollection(database, collection string) error {
 		return err
 	}
 
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	unlock := s.lockDatabaseWrite(database)
+	defer unlock()
 
 	err = db.Update(func(tx *bolt.Tx) error {
 		if tx.Bucket([]byte(collection)) == nil {

@@ -420,8 +420,8 @@ func (s *Store) DeleteIndex(database, collection, field string) error {
 		return err
 	}
 
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	unlock := s.lockDatabaseWrite(database)
+	defer unlock()
 
 	return db.Update(func(tx *bolt.Tx) error {
 		metaBucket := tx.Bucket(getIndexesMetaBucketName())

@@ -64,6 +64,9 @@ func (s *Store) DeleteDatabase(name string) error {
 		return fmt.Errorf("inspect database: %w", err)
 	}
 
+	unlock := s.lockDatabaseWrite(name)
+	defer unlock()
+
 	s.mu.Lock()
 	h, ok := s.dbs[name]
 	if !ok {
@@ -87,6 +90,9 @@ func (s *Store) DeleteDatabase(name string) error {
 	s.mu.Lock()
 	delete(s.dbs, name)
 	s.mu.Unlock()
+	s.writeLocksMu.Lock()
+	delete(s.writeLocks, name)
+	s.writeLocksMu.Unlock()
 
 	if err != nil {
 		return fmt.Errorf("delete database: %w", err)

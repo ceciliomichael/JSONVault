@@ -13,6 +13,7 @@ type rateLimiter struct {
 	mu       sync.Mutex
 	limit    int
 	window   time.Duration
+	maxKeys  int
 	requests map[string]rateWindow
 }
 
@@ -31,6 +32,7 @@ func newRateLimiter(limit int, window time.Duration) *rateLimiter {
 	return &rateLimiter{
 		limit:    limit,
 		window:   window,
+		maxKeys:  4096,
 		requests: make(map[string]rateWindow),
 	}
 }
@@ -38,6 +40,11 @@ func newRateLimiter(limit int, window time.Duration) *rateLimiter {
 func (l *rateLimiter) allow(key string, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	l.pruneExpired(now)
+	if _, exists := l.requests[key]; !exists && l.maxKeys > 0 && len(l.requests) >= l.maxKeys {
+		return false
+	}
 
 	current := l.requests[key]
 	if current.start.IsZero() || now.Sub(current.start) >= l.window {
@@ -50,6 +57,14 @@ func (l *rateLimiter) allow(key string, now time.Time) bool {
 	current.count++
 	l.requests[key] = current
 	return true
+}
+
+func (l *rateLimiter) pruneExpired(now time.Time) {
+	for key, window := range l.requests {
+		if window.start.IsZero() || now.Sub(window.start) >= l.window {
+			delete(l.requests, key)
+		}
+	}
 }
 
 func (s *Server) rateLimitOperational() gin.HandlerFunc {

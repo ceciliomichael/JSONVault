@@ -25,6 +25,9 @@ func (s *Store) CreateDocumentWithTTL(database, collection string, body []byte, 
 	if err != nil {
 		return Document{}, err
 	}
+	if err := s.enforceDocumentSize(data); err != nil {
+		return Document{}, err
+	}
 	if err := s.ValidateDocument(database, collection, data); err != nil {
 		return Document{}, err
 	}
@@ -38,10 +41,11 @@ func (s *Store) CreateDocumentWithTTL(database, collection string, body []byte, 
 		return Document{}, err
 	}
 
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	unlock := s.lockDatabaseWrite(database)
+	defer unlock()
 
 	var id string
+	var event Event
 	err = db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte(collection))
 		if err != nil {
@@ -72,7 +76,22 @@ func (s *Store) CreateDocumentWithTTL(database, collection string, body []byte, 
 				return err
 			}
 		}
-		return indexDocumentTx(tx, collection, id, data)
+		if err := indexDocumentTx(tx, collection, id, data); err != nil {
+			return err
+		}
+		recorded, recordErr := recordEventTx(tx, Event{
+			Action:     "insert",
+			Database:   database,
+			Collection: collection,
+			DocumentID: id,
+			ETag:       computeETag(data),
+			Document:   stdjson.RawMessage(data),
+		})
+		if recordErr != nil {
+			return recordErr
+		}
+		event = recorded
+		return nil
 	})
 
 	if err != nil {
@@ -80,14 +99,7 @@ func (s *Store) CreateDocumentWithTTL(database, collection string, body []byte, 
 	}
 
 	doc := Document{ID: id, Document: stdjson.RawMessage(data), ETag: computeETag(data)}
-	s.PublishEvent(Event{
-		Action:     "insert",
-		Database:   database,
-		Collection: collection,
-		DocumentID: id,
-		ETag:       doc.ETag,
-		Document:   doc.Document,
-	})
+	s.PublishEvent(event)
 	return doc, nil
 }
 
@@ -109,6 +121,9 @@ func (s *Store) PutDocumentWithTTL(database, collection, id string, body []byte,
 	if err != nil {
 		return Document{}, err
 	}
+	if err := s.enforceDocumentSize(data); err != nil {
+		return Document{}, err
+	}
 	if err := s.ValidateDocument(database, collection, data); err != nil {
 		return Document{}, err
 	}
@@ -122,10 +137,11 @@ func (s *Store) PutDocumentWithTTL(database, collection, id string, body []byte,
 		return Document{}, err
 	}
 
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	unlock := s.lockDatabaseWrite(database)
+	defer unlock()
 
 	var isInsert bool
+	var event Event
 
 	err = db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte(collection))
@@ -168,7 +184,27 @@ func (s *Store) PutDocumentWithTTL(database, collection, id string, body []byte,
 				return err
 			}
 		}
-		return indexDocumentTx(tx, collection, id, data)
+		if err := indexDocumentTx(tx, collection, id, data); err != nil {
+			return err
+		}
+
+		action := "update"
+		if isInsert {
+			action = "insert"
+		}
+		recorded, recordErr := recordEventTx(tx, Event{
+			Action:     action,
+			Database:   database,
+			Collection: collection,
+			DocumentID: id,
+			ETag:       computeETag(data),
+			Document:   stdjson.RawMessage(data),
+		})
+		if recordErr != nil {
+			return recordErr
+		}
+		event = recorded
+		return nil
 	})
 
 	if err != nil {
@@ -180,19 +216,7 @@ func (s *Store) PutDocumentWithTTL(database, collection, id string, body []byte,
 
 	doc := Document{ID: id, Document: stdjson.RawMessage(data), ETag: computeETag(data)}
 
-	action := "update"
-	if isInsert {
-		action = "insert"
-	}
-
-	s.PublishEvent(Event{
-		Action:     action,
-		Database:   database,
-		Collection: collection,
-		DocumentID: id,
-		ETag:       doc.ETag,
-		Document:   doc.Document,
-	})
+	s.PublishEvent(event)
 	return doc, nil
 }
 
@@ -206,6 +230,9 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte, expe
 	if err := ValidateDocumentID(id); err != nil {
 		return Document{}, err
 	}
+	if err := s.enforceDocumentSize(body); err != nil {
+		return Document{}, err
+	}
 	if !sonic.ConfigDefault.Valid(body) {
 		return Document{}, ErrInvalidJSON
 	}
@@ -215,10 +242,11 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte, expe
 		return Document{}, err
 	}
 
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	unlock := s.lockDatabaseWrite(database)
+	defer unlock()
 
 	var data []byte
+	var event Event
 	err = db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(collection))
 		if b == nil {
@@ -261,6 +289,9 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte, expe
 		if err != nil {
 			return err
 		}
+		if err := s.enforceDocumentSize(data); err != nil {
+			return err
+		}
 		if err := s.validateDocumentWithSchema(database, collection, getSchemaTx(tx, collection), data); err != nil {
 			return err
 		}
@@ -276,7 +307,22 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte, expe
 		if err := b.Put([]byte(id), encryptedData); err != nil {
 			return err
 		}
-		return indexDocumentTx(tx, collection, id, data)
+		if err := indexDocumentTx(tx, collection, id, data); err != nil {
+			return err
+		}
+		recorded, recordErr := recordEventTx(tx, Event{
+			Action:     "update",
+			Database:   database,
+			Collection: collection,
+			DocumentID: id,
+			ETag:       computeETag(data),
+			Document:   stdjson.RawMessage(data),
+		})
+		if recordErr != nil {
+			return recordErr
+		}
+		event = recorded
+		return nil
 	})
 
 	if err != nil {
@@ -287,14 +333,7 @@ func (s *Store) PatchDocument(database, collection, id string, body []byte, expe
 	}
 
 	doc := Document{ID: id, Document: stdjson.RawMessage(data), ETag: computeETag(data)}
-	s.PublishEvent(Event{
-		Action:     "update",
-		Database:   database,
-		Collection: collection,
-		DocumentID: id,
-		ETag:       doc.ETag,
-		Document:   doc.Document,
-	})
+	s.PublishEvent(event)
 	return doc, nil
 }
 
@@ -314,9 +353,10 @@ func (s *Store) DeleteDocument(database, collection, id string, expectedETag str
 		return err
 	}
 
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	unlock := s.lockDatabaseWrite(database)
+	defer unlock()
 
+	var event Event
 	err = db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(collection))
 		if b == nil {
@@ -344,7 +384,20 @@ func (s *Store) DeleteDocument(database, collection, id string, expectedETag str
 		if err := b.Delete([]byte(id)); err != nil {
 			return err
 		}
-		return unindexDocumentTx(tx, collection, id, existingPlaintext)
+		if err := unindexDocumentTx(tx, collection, id, existingPlaintext); err != nil {
+			return err
+		}
+		recorded, recordErr := recordEventTx(tx, Event{
+			Action:     "delete",
+			Database:   database,
+			Collection: collection,
+			DocumentID: id,
+		})
+		if recordErr != nil {
+			return recordErr
+		}
+		event = recorded
+		return nil
 	})
 
 	if err != nil {
@@ -354,12 +407,7 @@ func (s *Store) DeleteDocument(database, collection, id string, expectedETag str
 		return fmt.Errorf("delete document: %w", err)
 	}
 
-	s.PublishEvent(Event{
-		Action:     "delete",
-		Database:   database,
-		Collection: collection,
-		DocumentID: id,
-	})
+	s.PublishEvent(event)
 
 	return nil
 }

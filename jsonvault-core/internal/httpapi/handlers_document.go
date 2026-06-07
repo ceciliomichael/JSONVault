@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -64,7 +65,7 @@ func (s *Server) handleCollectionDocuments(c *gin.Context) {
 		sortField := query.Get("sort")
 		searchQuery := query.Get("search")
 
-		documents, total, err := s.store.ListDocuments(c.Request.Context(), database, collection, limit, offset, filter, sortField, searchQuery)
+		result, err := s.store.ListDocumentsDetailed(c.Request.Context(), database, collection, limit, offset, filter, sortField, searchQuery)
 		if err != nil {
 			// If the database or collection doesn't exist yet, return an empty list gracefully
 			if errors.Is(err, store.ErrNotFound) {
@@ -74,15 +75,58 @@ func (s *Server) handleCollectionDocuments(c *gin.Context) {
 				c.JSON(http.StatusOK, []interface{}{})
 				return
 			}
+			if errors.Is(err, store.ErrQueryLimitExceeded) {
+				c.JSON(http.StatusUnprocessableEntity, gin.H{"error": queryLimitError(err, filter, sortField, searchQuery, offset)})
+				return
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				c.JSON(http.StatusUnprocessableEntity, gin.H{"error": gin.H{
+					"code":    "query_limit_exceeded",
+					"message": "query exceeded configured duration budget",
+					"reason":  "duration_limit",
+					"advice":  queryAdvice(filter, sortField, searchQuery, offset),
+				}})
+				return
+			}
 			s.handleStoreError(c, err)
 			return
 		}
 
-		c.Header("X-Total-Count", strconv.Itoa(total))
+		c.Header("X-Total-Count", strconv.Itoa(result.Total))
 		c.Header("X-Limit", strconv.Itoa(limit))
 		c.Header("X-Offset", strconv.Itoa(offset))
+		c.Header("X-JSONVault-Scanned-Documents", strconv.Itoa(result.Stats.ScannedDocuments))
+		c.Header("X-JSONVault-Scanned-Bytes", strconv.FormatInt(result.Stats.ScannedBytes, 10))
+		c.Header("X-JSONVault-Returned-Bytes", strconv.FormatInt(result.Stats.ReturnedBytes, 10))
+		if result.Stats.IndexUsed != "" {
+			c.Header("X-JSONVault-Index-Used", result.Stats.IndexUsed)
+		}
+		if result.Stats.SortMode != "" {
+			c.Header("X-JSONVault-Sort-Mode", result.Stats.SortMode)
+		}
+		if result.Stats.FTSCandidates > 0 {
+			c.Header("X-JSONVault-FTS-Candidates", strconv.Itoa(result.Stats.FTSCandidates))
+		}
+		if len(filter) > 0 && result.Stats.IndexUsed == "" {
+			c.Header("X-JSONVault-Warning", "unindexed_filter")
+		}
+		if sortField != "" && result.Stats.SortMode == "in_memory" {
+			c.Header("X-JSONVault-Sort-Warning", "in_memory_sort")
+		}
+		if offset > 0 {
+			c.Header("X-JSONVault-Pagination-Warning", "offset_pagination")
+		}
 
-		c.JSON(http.StatusOK, documents)
+		if query.Get("explain") == "true" {
+			c.JSON(http.StatusOK, gin.H{
+				"total":  result.Total,
+				"limit":  limit,
+				"offset": offset,
+				"stats":  result.Stats,
+			})
+			return
+		}
+		c.JSON(http.StatusOK, result.Documents)
 	case http.MethodPost:
 		if !s.hasScope(c, auth.ScopeReadWrite) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
@@ -107,6 +151,48 @@ func (s *Server) handleCollectionDocuments(c *gin.Context) {
 	default:
 		c.AbortWithStatus(http.StatusMethodNotAllowed)
 	}
+}
+
+func queryLimitError(err error, filter map[string]interface{}, sortField, searchQuery string, offset int) gin.H {
+	return gin.H{
+		"code":    "query_limit_exceeded",
+		"message": err.Error(),
+		"reason":  queryLimitReason(err),
+		"advice":  queryAdvice(filter, sortField, searchQuery, offset),
+	}
+}
+
+func queryLimitReason(err error) string {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "scanned documents"):
+		return "scan_docs_limit"
+	case strings.Contains(msg, "scanned bytes"):
+		return "scan_bytes_limit"
+	case strings.Contains(msg, "response bytes"):
+		return "response_bytes_limit"
+	case strings.Contains(msg, "fts candidates"):
+		return "fts_candidates_limit"
+	default:
+		return "resource_limit"
+	}
+}
+
+func queryAdvice(filter map[string]interface{}, sortField, searchQuery string, offset int) []string {
+	advice := []string{"lower_limit"}
+	if len(filter) > 0 {
+		advice = append(advice, "narrow_filter", "request_index")
+	}
+	if sortField != "" {
+		advice = append(advice, "narrow_filter_before_sort")
+	}
+	if searchQuery != "" {
+		advice = append(advice, "use_more_specific_search")
+	}
+	if offset > 0 {
+		advice = append(advice, "avoid_deep_offset")
+	}
+	return advice
 }
 
 func (s *Server) handleDocumentByID(c *gin.Context) {

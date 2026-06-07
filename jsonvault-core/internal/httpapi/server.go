@@ -26,14 +26,18 @@ type Store interface {
 	GetSchema(database, collection string) ([]byte, error)
 
 	SetFTSConfig(database, collection string, fields []string) error
+	GetFTSConfig(database, collection string) (store.FTSConfig, bool, error)
 	SearchFTS(database, collection, query string) ([]string, error)
 
 	SetWebhooks(database, collection string, webhooks []store.WebhookConfig) (string, error)
 	GetWebhooks(database, collection string) (*store.WebhookRecord, error)
+	ListWebhookDeliveries(database, status string, limit int) ([]store.WebhookDelivery, error)
+	RetryWebhookDelivery(database string, sequence uint64) error
 
 	CreateDocument(database, collection string, body []byte) (store.Document, error)
 	CreateDocumentWithTTL(database, collection string, body []byte, expireIn time.Duration) (store.Document, error)
 	ListDocuments(ctx context.Context, database, collection string, limit, offset int, filter map[string]interface{}, sortField string, searchQuery string) ([]store.Document, int, error)
+	ListDocumentsDetailed(ctx context.Context, database, collection string, limit, offset int, filter map[string]interface{}, sortField string, searchQuery string) (store.ListResult, error)
 	GetDocument(database, collection, id string) (store.Document, error)
 	PutDocument(database, collection, id string, body []byte, expectedETag string) (store.Document, error)
 	PutDocumentWithTTL(database, collection, id string, body []byte, expectedETag string, expireIn time.Duration) (store.Document, error)
@@ -51,6 +55,7 @@ type Store interface {
 
 	Subscribe(database, collection string) *store.Subscription
 	Unsubscribe(sub *store.Subscription)
+	ReplayEvents(database, collection string, after uint64, limit int) ([]store.Event, error)
 	PublishEvent(event store.Event)
 	GetSubscriberCount(database, collection string) int
 }
@@ -65,6 +70,8 @@ type Server struct {
 	authenticator *auth.Authenticator
 	maxBodyBytes  int64
 	rateLimiter   *rateLimiter
+	operations    *operationTracker
+	audit         *auditLog
 }
 
 func NewHandler(db Store, authenticator *auth.Authenticator, options Options) http.Handler {
@@ -82,6 +89,8 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 		authenticator: authenticator,
 		maxBodyBytes:  maxBodyBytes,
 		rateLimiter:   newRateLimiter(adminRateLimit, time.Minute),
+		operations:    newOperationTracker(),
+		audit:         newAuditLog(),
 	}
 
 	gin.SetMode(gin.ReleaseMode)
@@ -99,7 +108,7 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 			c.Next()
 			return
 		}
-		ok, scope, jwtDb, jwtColl := authenticator.Authenticate(c.GetHeader("Authorization"))
+		authCtx, ok := authenticator.AuthenticateContext(c.GetHeader("Authorization"))
 		if !ok {
 			c.Header("WWW-Authenticate", `Bearer realm="jsonvault"`)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, map[string]any{
@@ -110,9 +119,11 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 			})
 			return
 		}
-		c.Set("scope", scope)
-		c.Set("jwt_db", jwtDb)
-		c.Set("jwt_coll", jwtColl)
+		c.Set("scope", authCtx.Scope)
+		c.Set("jwt_db", authCtx.Database)
+		c.Set("jwt_coll", authCtx.Collection)
+		c.Set("token_id", authCtx.TokenID)
+		c.Set("capabilities", authCtx.Capabilities)
 		c.Next()
 	})
 
@@ -130,6 +141,12 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 
 	v1 := r.Group("/api/v1")
 	{
+		v1.GET("/me", server.handleMe)
+		v1.GET("/operations", server.handleListOperations)
+		v1.GET("/operations/:operation_id", server.handleGetOperation)
+		v1.POST("/operations/:operation_id/cancel", server.rateLimitOperational(), server.handleCancelOperation)
+		v1.GET("/audit", server.handleListAudit)
+
 		v1.GET("/admin/keys", func(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusMethodNotAllowed, gin.H{"error": "use POST to generate keys"})
 		})
@@ -137,6 +154,8 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 		v1.DELETE("/admin/keys/:jti", server.rateLimitOperational(), server.handleRevokeKey)
 
 		v1.GET("/admin/backup/:database", server.rateLimitOperational(), server.handleBackupDatabase)
+		v1.GET("/admin/webhooks/:database/deliveries", server.rateLimitOperational(), server.handleListWebhookDeliveries)
+		v1.POST("/admin/webhooks/:database/deliveries/:sequence/retry", server.rateLimitOperational(), server.handleRetryWebhookDelivery)
 
 		v1.GET("/databases", server.handleDatabases)
 		v1.POST("/databases", server.rateLimitOperational(), server.handleDatabases)
@@ -155,9 +174,11 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 		v1.POST("/:database/:collection/indexes", server.rateLimitOperational(), server.handleCreateIndex)
 		v1.DELETE("/:database/:collection/indexes/:field", server.rateLimitOperational(), server.handleDeleteIndex)
 
+		v1.GET("/:database/:collection/fts", server.handleGetFTSConfig)
 		v1.POST("/:database/:collection/fts", server.rateLimitOperational(), server.handleSetFTSConfig)
 
 		v1.GET("/:database/:collection/schema", server.handleGetSchema)
+		v1.POST("/:database/:collection/schema/validate", server.rateLimitOperational(), server.handleValidateSchema)
 		v1.PUT("/:database/:collection/schema", server.rateLimitOperational(), server.handleSetSchema)
 		v1.DELETE("/:database/:collection/schema", server.rateLimitOperational(), server.handleSetSchema)
 
@@ -188,6 +209,8 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 		store:         db,
 		authenticator: nil,
 		maxBodyBytes:  maxBodyBytes,
+		operations:    newOperationTracker(),
+		audit:         newAuditLog(),
 	}
 
 	gin.SetMode(gin.ReleaseMode)
@@ -200,6 +223,8 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 		c.Set("scope", auth.ScopeAdmin)
 		c.Set("jwt_db", "*")
 		c.Set("jwt_coll", "*")
+		c.Set("token_id", "test-admin")
+		c.Set("capabilities", auth.DefaultCapabilities(auth.ScopeAdmin))
 		c.Next()
 	})
 
@@ -209,11 +234,19 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 
 	v1 := r.Group("/api/v1")
 	{
+		v1.GET("/me", server.handleMe)
+		v1.GET("/operations", server.handleListOperations)
+		v1.GET("/operations/:operation_id", server.handleGetOperation)
+		v1.POST("/operations/:operation_id/cancel", server.handleCancelOperation)
+		v1.GET("/audit", server.handleListAudit)
+
 		v1.GET("/admin/keys", func(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusMethodNotAllowed, gin.H{"error": "use POST to generate keys"})
 		})
 		v1.POST("/admin/keys", server.handleCreateKey)
 		v1.DELETE("/admin/keys/:jti", server.handleRevokeKey)
+		v1.GET("/admin/webhooks/:database/deliveries", server.handleListWebhookDeliveries)
+		v1.POST("/admin/webhooks/:database/deliveries/:sequence/retry", server.handleRetryWebhookDelivery)
 
 		v1.GET("/databases", server.handleDatabases)
 		v1.POST("/databases", server.handleDatabases)
@@ -232,9 +265,11 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 		v1.POST("/:database/:collection/indexes", server.handleCreateIndex)
 		v1.DELETE("/:database/:collection/indexes/:field", server.handleDeleteIndex)
 
+		v1.GET("/:database/:collection/fts", server.handleGetFTSConfig)
 		v1.POST("/:database/:collection/fts", server.handleSetFTSConfig)
 
 		v1.GET("/:database/:collection/schema", server.handleGetSchema)
+		v1.POST("/:database/:collection/schema/validate", server.handleValidateSchema)
 		v1.PUT("/:database/:collection/schema", server.handleSetSchema)
 		v1.DELETE("/:database/:collection/schema", server.handleSetSchema)
 
@@ -278,6 +313,16 @@ func (s *Server) hasScope(c *gin.Context, required auth.Scope) bool {
 		return true
 	}
 
+	if required == auth.ScopeReadOnly {
+		return s.hasCapability(c, auth.CapabilityDocumentsRead)
+	}
+	if required == auth.ScopeReadWrite {
+		return s.hasCapability(c, auth.CapabilityDocumentsWrite)
+	}
+	if required == auth.ScopeAdmin {
+		return false
+	}
+
 	// Verify scope level
 	hasRightScope := false
 	if scope == auth.ScopeReadWrite && (required == auth.ScopeReadWrite || required == auth.ScopeReadOnly) {
@@ -314,6 +359,78 @@ func (s *Server) hasScope(c *gin.Context, required auth.Scope) bool {
 	return true
 }
 
+func (s *Server) hasCapability(c *gin.Context, capability auth.Capability) bool {
+	return s.hasCapabilityFor(c, capability, c.Param("database"), c.Param("collection"))
+}
+
+func (s *Server) hasCapabilityFor(c *gin.Context, capability auth.Capability, database, collection string) bool {
+	val, exists := c.Get("scope")
+	if !exists {
+		return true // Auth disabled
+	}
+	scope, ok := val.(auth.Scope)
+	if !ok {
+		return false
+	}
+	if scope == auth.ScopeAdmin {
+		return true
+	}
+
+	if !contextHasCapability(c, capability) {
+		return false
+	}
+	return tokenAllowsResource(c, database, collection)
+}
+
+func contextHasCapability(c *gin.Context, capability auth.Capability) bool {
+	raw, ok := c.Get("capabilities")
+	if !ok {
+		return false
+	}
+	capabilities, ok := raw.([]auth.Capability)
+	if !ok {
+		return false
+	}
+	for _, current := range capabilities {
+		if current == capability {
+			return true
+		}
+	}
+	return false
+}
+
+func tokenAllowsResource(c *gin.Context, database, collection string) bool {
+	jwtDb, _ := c.Get("jwt_db")
+	jwtColl, _ := c.Get("jwt_coll")
+
+	dbConstraint, _ := jwtDb.(string)
+	collConstraint, _ := jwtColl.(string)
+
+	if dbConstraint != "*" {
+		if database == "" || database != dbConstraint {
+			return false
+		}
+	}
+	if collConstraint != "*" {
+		if collection == "" || collection != collConstraint {
+			return false
+		}
+	}
+	return true
+}
+
+func tokenID(c *gin.Context) string {
+	raw, _ := c.Get("token_id")
+	if tokenID, ok := raw.(string); ok && tokenID != "" {
+		return tokenID
+	}
+	rawScope, _ := c.Get("scope")
+	if scope, ok := rawScope.(auth.Scope); ok {
+		return string(scope)
+	}
+	return "unknown"
+}
+
 func (s *Server) handleDeleteDatabase(c *gin.Context) {
 	if !s.hasScope(c, auth.ScopeAdmin) {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
@@ -328,16 +445,17 @@ func (s *Server) handleDeleteDatabase(c *gin.Context) {
 }
 
 func (s *Server) handleDeleteCollection(c *gin.Context) {
-	if !s.hasScope(c, auth.ScopeAdmin) {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-		return
-	}
 	database := c.Param("database")
 	collection := c.Param("collection")
+	if !s.hasCapabilityFor(c, auth.CapabilityCollectionsManage, database, collection) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "collections:manage capability required"})
+		return
+	}
 	if err := s.store.DeleteCollection(database, collection); err != nil {
 		s.handleStoreError(c, err)
 		return
 	}
+	s.audit.append(auditRecord{Actor: tokenID(c), Action: "collection.delete", Database: database, Collection: collection, Status: "ready"})
 	c.JSON(http.StatusOK, map[string]any{"deleted": true, "name": collection})
 }
 

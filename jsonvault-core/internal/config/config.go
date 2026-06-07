@@ -17,10 +17,20 @@ var ErrMissingJWTSecret = errors.New("missing JSONVAULT_JWT_SECRET")
 type Config struct {
 	Addr               string
 	DataDir            string
+	Profile            string
 	AdminKey           string
 	JWTSecret          []byte
 	CacheEntries       int
 	MaxBodyBytes       int64
+	MaxDocumentBytes   int
+	MaxResponseBytes   int
+	MaxQueryScanDocs   int
+	MaxQueryScanBytes  int64
+	MaxQueryDuration   time.Duration
+	BackupTempDir      string
+	BackupConcurrency  int
+	MaxHeaderBytes     int
+	PprofAddr          string
 	AdminRateLimit     int
 	ReadHeaderTimeout  time.Duration
 	ReadTimeout        time.Duration
@@ -40,6 +50,12 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	profile := strings.ToLower(envString("JSONVAULT_PROFILE", "default"))
+	defaults, err := defaultsForProfile(profile)
+	if err != nil {
+		return Config{}, err
+	}
+
 	adminKey := envString("JSONVAULT_ADMIN_KEY", "")
 	if adminKey == "" {
 		return Config{}, ErrMissingAdminKey
@@ -51,7 +67,7 @@ func Load() (Config, error) {
 	}
 	jwtSecret := []byte(jwtSecretStr)
 
-	cacheEntries, err := envInt("JSONVAULT_CACHE_ENTRIES", 1024)
+	cacheEntries, err := envInt("JSONVAULT_CACHE_ENTRIES", defaults.cacheEntries)
 	if err != nil {
 		return Config{}, err
 	}
@@ -59,12 +75,59 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("JSONVAULT_CACHE_ENTRIES must be greater than zero")
 	}
 
-	maxBodyBytes, err := envInt64("JSONVAULT_MAX_BODY_BYTES", 10*1024*1024)
+	maxBodyBytes, err := envInt64("JSONVAULT_MAX_BODY_BYTES", defaults.maxBodyBytes)
 	if err != nil {
 		return Config{}, err
 	}
 	if maxBodyBytes < 1 {
 		return Config{}, fmt.Errorf("JSONVAULT_MAX_BODY_BYTES must be greater than zero")
+	}
+	maxDocumentBytes, err := envInt("JSONVAULT_MAX_DOCUMENT_BYTES", int(maxBodyBytes))
+	if err != nil {
+		return Config{}, err
+	}
+	if maxDocumentBytes < 1 {
+		return Config{}, fmt.Errorf("JSONVAULT_MAX_DOCUMENT_BYTES must be greater than zero")
+	}
+	maxResponseBytes, err := envInt("JSONVAULT_MAX_RESPONSE_BYTES", defaults.maxResponseBytes)
+	if err != nil {
+		return Config{}, err
+	}
+	if maxResponseBytes < 1 {
+		return Config{}, fmt.Errorf("JSONVAULT_MAX_RESPONSE_BYTES must be greater than zero")
+	}
+	maxQueryScanDocs, err := envInt("JSONVAULT_MAX_QUERY_SCAN_DOCS", defaults.maxQueryScanDocs)
+	if err != nil {
+		return Config{}, err
+	}
+	if maxQueryScanDocs < 1 {
+		return Config{}, fmt.Errorf("JSONVAULT_MAX_QUERY_SCAN_DOCS must be greater than zero")
+	}
+	maxQueryScanBytes, err := envInt64("JSONVAULT_MAX_QUERY_SCAN_BYTES", defaults.maxQueryScanBytes)
+	if err != nil {
+		return Config{}, err
+	}
+	if maxQueryScanBytes < 1 {
+		return Config{}, fmt.Errorf("JSONVAULT_MAX_QUERY_SCAN_BYTES must be greater than zero")
+	}
+	maxQueryDuration, err := envDuration("JSONVAULT_MAX_QUERY_DURATION", defaults.maxQueryDuration)
+	if err != nil {
+		return Config{}, err
+	}
+	backupTempDir := envString("JSONVAULT_BACKUP_TEMP_DIR", "")
+	backupConcurrency, err := envInt("JSONVAULT_BACKUP_CONCURRENCY", defaults.backupConcurrency)
+	if err != nil {
+		return Config{}, err
+	}
+	if backupConcurrency < 1 {
+		return Config{}, fmt.Errorf("JSONVAULT_BACKUP_CONCURRENCY must be greater than zero")
+	}
+	maxHeaderBytes, err := envInt("JSONVAULT_MAX_HEADER_BYTES", defaults.maxHeaderBytes)
+	if err != nil {
+		return Config{}, err
+	}
+	if maxHeaderBytes < 1 {
+		return Config{}, fmt.Errorf("JSONVAULT_MAX_HEADER_BYTES must be greater than zero")
 	}
 	adminRateLimit, err := envInt("JSONVAULT_ADMIN_RATE_LIMIT_PER_MINUTE", 120)
 	if err != nil {
@@ -118,10 +181,20 @@ func Load() (Config, error) {
 	return Config{
 		Addr:               envString("JSONVAULT_ADDR", ":8080"),
 		DataDir:            envString("JSONVAULT_DATA_DIR", "./data"),
+		Profile:            profile,
 		AdminKey:           adminKey,
 		JWTSecret:          jwtSecret,
 		CacheEntries:       cacheEntries,
 		MaxBodyBytes:       maxBodyBytes,
+		MaxDocumentBytes:   maxDocumentBytes,
+		MaxResponseBytes:   maxResponseBytes,
+		MaxQueryScanDocs:   maxQueryScanDocs,
+		MaxQueryScanBytes:  maxQueryScanBytes,
+		MaxQueryDuration:   maxQueryDuration,
+		BackupTempDir:      backupTempDir,
+		BackupConcurrency:  backupConcurrency,
+		MaxHeaderBytes:     maxHeaderBytes,
+		PprofAddr:          envString("JSONVAULT_PPROF_ADDR", ""),
 		AdminRateLimit:     adminRateLimit,
 		ReadHeaderTimeout:  readHeaderTimeout,
 		ReadTimeout:        readTimeout,
@@ -131,6 +204,57 @@ func Load() (Config, error) {
 		EncryptionKey:      encryptionKey,
 		EncryptionRequired: encryptionRequired,
 	}, nil
+}
+
+type profileDefaults struct {
+	cacheEntries      int
+	maxBodyBytes      int64
+	maxResponseBytes  int
+	maxQueryScanDocs  int
+	maxQueryScanBytes int64
+	maxQueryDuration  time.Duration
+	backupConcurrency int
+	maxHeaderBytes    int
+}
+
+func defaultsForProfile(profile string) (profileDefaults, error) {
+	switch profile {
+	case "", "default":
+		return profileDefaults{
+			cacheEntries:      10,
+			maxBodyBytes:      10 * 1024 * 1024,
+			maxResponseBytes:  32 * 1024 * 1024,
+			maxQueryScanDocs:  50000,
+			maxQueryScanBytes: 128 * 1024 * 1024,
+			maxQueryDuration:  15 * time.Second,
+			backupConcurrency: 1,
+			maxHeaderBytes:    1 * 1024 * 1024,
+		}, nil
+	case "tiny":
+		return profileDefaults{
+			cacheEntries:      8,
+			maxBodyBytes:      1 * 1024 * 1024,
+			maxResponseBytes:  8 * 1024 * 1024,
+			maxQueryScanDocs:  5000,
+			maxQueryScanBytes: 16 * 1024 * 1024,
+			maxQueryDuration:  5 * time.Second,
+			backupConcurrency: 1,
+			maxHeaderBytes:    256 * 1024,
+		}, nil
+	case "large":
+		return profileDefaults{
+			cacheEntries:      128,
+			maxBodyBytes:      50 * 1024 * 1024,
+			maxResponseBytes:  128 * 1024 * 1024,
+			maxQueryScanDocs:  500000,
+			maxQueryScanBytes: 1 * 1024 * 1024 * 1024,
+			maxQueryDuration:  60 * time.Second,
+			backupConcurrency: 2,
+			maxHeaderBytes:    2 * 1024 * 1024,
+		}, nil
+	default:
+		return profileDefaults{}, fmt.Errorf("JSONVAULT_PROFILE must be one of: tiny, default, large")
+	}
 }
 
 func LoadDotEnvFile(path string) error {

@@ -6,6 +6,29 @@ JSONVault is a NoSQL document database built for speed and developer experience.
 
 Data is organized into a strict hierarchy: **Database -> Collection -> Document**.
 
+This guide is for people building apps against a JSONVault instance that is
+already hosted. You control:
+
+- the API key/JWT you send;
+- document request bodies;
+- query parameters such as `limit`, `offset`, `filter`, `sort`, and `search`;
+- ETag headers for safe updates;
+- SSE reconnect behavior such as `Last-Event-ID`.
+
+You do not configure server environment variables from this guide. Server
+profiles, disk paths, backup settings, encryption mode, and resource limits are
+managed by the JSONVault host/operator.
+
+Admin-only setup actions are called out as host-managed. If you are using a
+hosted JSONVault instance with a normal `read_write` key, you use the runtime
+API here and ask the host/operator to change schemas, indexes, FTS settings,
+webhooks, keys, backups, or server limits.
+
+If your host gives you a project management token, it may include capabilities
+such as `indexes:manage`, `fts:manage`, `schemas:manage`, or `webhooks:manage`
+for your own database. Keep that token in trusted backend/dashboard/CLI code,
+not in browser or mobile runtime code.
+
 ---
 
 ## 💡 1. Core Principles (The "Quirks")
@@ -45,7 +68,14 @@ Content-Type: application/json
 
 If you receive a `403 Forbidden` error or a `401 Unauthorized` error, your JWT Token does not have the required permissions for that specific database/collection.
 
-Normal `read_write` keys are limited to document CRUD, transactions, and transient publish within their JWT database/collection constraints. Schema, index, FTS, webhook, database, collection, key, and backup management require an admin key.
+Normal `read_write` keys are limited to document CRUD, transactions, and
+transient publish within their JWT database/collection constraints. Schema,
+index, FTS, webhook, collection, and key management require explicit project
+management capabilities or an admin key. Backup and server setting management
+remain host/operator responsibilities.
+
+Use `GET /api/v1/me` to inspect your token's scope, database/collection
+constraints, token ID, and capabilities.
 
 ---
 
@@ -60,12 +90,17 @@ Open a persistent HTTP connection to receive live document mutations.
 - **Event Format:**
   ```text
   data: {"sequence":1,"action":"insert","database":"{db}","collection":"{coll}","document_id":"<id>","etag":"<new_etag>","document":{...}}
+  id: 1
   
   data: {"sequence":2,"action":"update","database":"{db}","collection":"{coll}","document_id":"<id>","etag":"<new_etag>","document":{...}}
+  id: 2
   
   data: {"sequence":3,"action":"delete","database":"{db}","collection":"{coll}","document_id":"<id>"}
+  id: 3
   ```
-*(Note: To prevent proxies from dropping idle connections, JSONVault sends a silent `: keepalive` comment every 15 seconds. Standard EventSource clients handle this automatically. If a subscriber falls behind, JSONVault closes the stream; clients should reconnect and resync when that happens.)*
+Use the standard `Last-Event-ID` header, or `?last_event_id=<sequence>`, to replay retained committed document events after reconnecting. Transient `publish` messages are not stored and cannot be replayed.
+
+*(Note: To prevent proxies from dropping idle connections, JSONVault sends a silent `: keepalive` comment every 15 seconds. Standard EventSource clients handle this automatically. If a subscriber falls behind, JSONVault closes the stream; clients should reconnect with the last event ID.)*
 
 #### Publish Transient Message (Pub/Sub)
 Instantly broadcast a JSON message to all active SSE subscribers without saving it to the database disk. Perfect for ephemeral events like "User is typing...".
@@ -89,9 +124,58 @@ Retrieve a paginated list of documents, optionally filtered and sorted directly 
     - `limit` (max: 1000, default: 100)
     - `offset` (max: 10000, default: 0)
     - `sort` (e.g., `?sort=age` for ascending, or `?sort=-created_at` for descending)
+    - `search` (full-text search query, only useful when the host has enabled FTS for the collection)
     - `filter[<field>]` (e.g., `?filter[status]=%22active%22&filter[age]=30`)
       *Note: Filter values must be valid JSON strings (e.g. `%22string%22` for strings, `true` for booleans, `42` for numbers).*
 - **Response (200 OK):** An array of documents. (Pagination metadata is returned in `X-Total-Count`, `X-Limit`, `X-Offset` headers).
+
+If a query exceeds configured scan, response, or time budgets, JSONVault returns
+`query_limit_exceeded`. Lower the page size, use a more selective filter, or
+ask the JSONVault host to add an index or adjust server limits.
+
+These budgets are configured by the JSONVault host/operator. As an application
+developer using a hosted JSONVault instance, you do not set the server
+environment variables yourself.
+
+#### When `query_limit_exceeded` Happens
+
+This error means JSONVault stopped the query on purpose before it could consume
+too much CPU, memory, response size, or time on the server.
+
+You might run into it when:
+
+- the collection is large and your filter is not backed by an index;
+- the filter is too broad, such as `status="active"` when most documents are active;
+- the page is too large or each document is large, causing the response byte
+  budget to be exceeded;
+- the query uses a deep `offset`, so the server must walk many matching
+  documents before returning your page;
+- the query sorts a broad result set in memory;
+- the `search` term is too broad and matches too many FTS candidates.
+
+What you can do in app code:
+
+- lower `limit`;
+- add a more selective filter;
+- avoid deep offset pagination for large collections;
+- use more specific search terms;
+- avoid returning very large documents in list views when possible.
+
+Why you may need the host/operator: app developers with normal scoped keys
+cannot create indexes, change FTS indexed fields, raise server resource budgets,
+or resize the machine. Those changes affect server reliability for every user,
+so they belong to the JSONVault host/operator.
+
+Example error:
+
+```json
+{
+  "error": {
+    "code": "query_limit_exceeded",
+    "message": "query exceeds configured resource limit: scanned documents exceeded 50000"
+  }
+}
+```
 
 #### Create Document
 - **Request:** `POST /api/v1/{database}/{collection}`
@@ -126,68 +210,48 @@ Updates specific fields while preserving the rest (e.g. only updating `status: "
 
 ---
 
-### Schemas & Validation (Optional)
+### Schemas & Validation (Host-Managed)
 
-JSONVault is schemaless by default! However, if you want to strictly enforce data integrity on a collection, you can apply a Draft-07 JSON Schema.
+JSONVault is schemaless by default. A host/operator can attach a Draft-07 JSON
+Schema to a collection to enforce document shape.
 
-#### Set or Update a Schema
-- **Request:** `PUT /api/v1/{database}/{collection}/schema`
-- **Authorization:** Admin key required.
-- **Body:** Your valid JSON Schema object.
-- **Response (200 OK):** `{"updated": true}`
-*(Note: Once a schema is set, any `POST`/`PUT`/`PATCH` that violates the schema will be immediately rejected with a `400 Bad Request`).*
+As an application developer:
 
-#### Get Current Schema
-- **Request:** `GET /api/v1/{database}/{collection}/schema`
-- **Response (200 OK):** Returns the current JSON Schema, or `{"schema": null}` if none is set.
+- **Inspect active schema:** `GET /api/v1/{database}/{collection}/schema`
+- **No schema response:** `{"schema": null}`
+- **Validation failure:** `400 Bad Request` with error code `schema_validation_failed`
 
-#### Delete Schema
-- **Request:** `DELETE /api/v1/{database}/{collection}/schema`
-- **Authorization:** Admin key required.
-- **Response (200 OK):** `{"deleted": true}`
+Schema creation and removal require `schemas:manage` or an admin key. If a write
+starts failing because of validation, compare your payload with the active
+schema or ask the host/operator/project owner to update the collection schema.
 
 ---
 
-### Secondary Indexes
+### Secondary Indexes (Host-Managed)
 
-By default, queries using `?filter[...]` perform a full collection scan. For massive collections, you can create Secondary Indexes to achieve sub-millisecond lookups.
+Filters work whether or not an index exists. Without an index, JSONVault may
+need to scan documents until the query matches, reaches the page limit, or hits
+a host-configured query budget.
 
-#### Create an Index
-- **Request:** `POST /api/v1/{database}/{collection}/indexes`
-- **Authorization:** Admin key required.
-- **Body:** `{"field": "email"}`
-- **Response (201 Created):** `{"indexed": true, "field": "email"}`
-*(Note: Creating an index automatically backfills all existing documents. Queries use the B-Tree fast path only after the build is complete and promoted.)*
+As an application developer:
 
-#### List Indexes
-- **Request:** `GET /api/v1/{database}/{collection}/indexes`
-- **Response (200 OK):** `{"indexes": ["email", "status"]}`
+- Use `filter[<field>]` normally.
+- Inspect configured indexes with `GET /api/v1/{database}/{collection}/indexes`.
+- If a query returns `query_limit_exceeded`, reduce the page size, use a more
+  selective filter, or ask the host/operator to add an index.
 
-#### Delete an Index
-- **Request:** `DELETE /api/v1/{database}/{collection}/indexes/{field}`
-- **Authorization:** Admin key required.
-- **Response (200 OK):** `{"deleted": true}`
+Creating and deleting indexes require `indexes:manage` or an admin key. Index
+builds backfill existing documents and are promoted only when ready, so normal
+queries do not use partially built indexes.
 
 ---
 
 ### Full-Text Search (FTS)
 
-JSONVault includes a native high-performance inverted index engine allowing you to search for specific words or phrases inside your documents.
+JSONVault includes a native inverted index engine for searching configured text
+fields. The host/operator chooses which fields are indexed for each collection.
 
-#### 1. Configure Indexed Fields
-
-First, define which fields in your collection should be indexed for Full-Text Search.
-
-```bash
-curl -X POST "http://localhost:8080/api/v1/store/users/fts" \
-  -H "Authorization: Bearer <your_admin_key>" \
-  -H "Content-Type: application/json" \
-  -d '{"fields": ["name", "bio"]}'
-```
-
-Configuring FTS requires an admin key and rebuilds the collection FTS index from existing documents.
-
-#### 2. Querying
+#### Querying
 
 You can use the `search` query parameter to instantly intersect tokens and find matching documents. 
 For multiple words, standard URL encoding applies (e.g. `fast+car`).
@@ -201,6 +265,9 @@ curl "http://localhost:8080/api/v1/store/users?search=john" \
 curl "http://localhost:8080/api/v1/store/users?search=engineer&filter[status]=%22active%22" \
   -H "Authorization: Bearer <your_jwt_token>"
 ```
+
+If FTS is not configured for the collection, `search` returns no matches.
+Changing the FTS field list requires `fts:manage` or an admin key.
 
 ---
 
@@ -224,23 +291,12 @@ JSONVault supports ACID-compliant atomic transactions, allowing you to update mu
 
 ---
 
-### Outbound Webhooks
+### Outbound Webhook Delivery
 
-JSONVault can automatically send an HTTP POST request to your backend whenever data changes. This is extremely useful for event-driven architectures.
+If your host/operator configured webhooks for your collection, JSONVault can
+send an HTTP POST request to your backend whenever data changes. This is useful
+for event-driven architectures.
 *Note: JSONVault features strict SSRF protection and will block webhooks to internal or private IP addresses. Redirects are disabled, and deliveries are processed through bounded workers with per-target limits.*
-
-#### Register Webhooks
-- **Request:** `PUT /api/v1/{database}/{collection}/webhooks`
-- **Authorization:** Admin key required.
-- **Body:**
-  ```json
-  {
-    "webhooks": [
-      { "url": "https://api.myapp.com/webhook", "events": ["insert", "update", "delete"] }
-    ]
-  }
-  ```
-- **Response (200 OK):** Returns a `webhook_secret`. Keep this secret safe! JSONVault will use it to cryptographically sign the webhook payloads it sends you.
 
 #### Webhook Delivery
 When an event occurs, JSONVault will send a `POST` request to your URL containing the JSON payload.
@@ -253,22 +309,33 @@ The request will include these headers:
 
 Receivers should verify `X-JSONVault-Signature-V2`, reject old timestamps, and deduplicate recent event IDs.
 
+Webhook registration, delivery inspection, and manual retry require
+`webhooks:manage` or an admin key.
+
 ---
 
-### Administrative Endpoints
+### Discovery Endpoints
+
+Discovery endpoints are optional. If your JWT is scoped to one known database
+or collection, these may return `403 Forbidden`; your app can use the known path
+directly.
 
 #### Check Server Health
 - **Request:** `GET /healthz`
 
-#### List / Delete Databases
+#### List Databases
 - **List:** `GET /api/v1/databases`
-- **Create:** `POST /api/v1/databases` *(Requires Admin API Key)*
-- **Delete:** `DELETE /api/v1/{database}` *(Requires Admin API Key)*
+- **Access:** Requires a token broad enough to list databases, usually
+  `database: "*"` or admin.
 
-#### List / Create / Delete Collections
+#### List Collections
 - **List:** `GET /api/v1/{database}/collections`
-- **Create:** `POST /api/v1/{database}/collections` *(Requires Admin API Key)*
-- **Delete:** `DELETE /api/v1/{database}/collections/{collection}` *(Requires Admin API Key)*
+- **Access:** Requires access to the database and a token broad enough to list
+  collections, usually `collection: "*"` or admin.
+
+Database and collection creation/deletion are host-managed admin operations.
+For normal app development, writes auto-create the database and collection when
+your scoped key allows the target path.
 
 ---
 
@@ -284,9 +351,12 @@ All errors follow a standard, predictable JSON format:
 ```
 
 **Common Status Codes you might encounter:**
-- `400 Bad Request`: Invalid JSON, too many filters, or offset too large.
+- `400 Bad Request`: Invalid JSON, invalid filter literal, too many filters, offset too large, or schema validation failure.
 - `401 Unauthorized`: Missing or invalid Bearer token.
 - `403 Forbidden`: API Key lacks required permissions.
+- `404 Not Found`: Requested document or explicitly managed resource does not exist.
 - `429 Too Many Requests`: Operational/admin rate limit exceeded.
 - `412 Precondition Failed`: The ETag you provided does not match the server's current version (Someone else edited it!).
-- `413 Payload Too Large`: Request body exceeds the 10MB limit.
+- `413 Payload Too Large`: Request body or normalized document exceeds the host-configured size limit.
+- `415 Unsupported Media Type`: Write request is missing `Content-Type: application/json`.
+- `422 Unprocessable Entity`: Query exceeded host-configured scan, response, or time budgets.

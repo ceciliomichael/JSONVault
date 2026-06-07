@@ -36,4 +36,4 @@ Welcome to the engine room! `jsonvault-core` is the lightweight, fast, and secur
 ## Where to start?
 To integrate JSONVault into your apps or manage your deployment, check out the documentation in the root `docs/` folder:
 - **[Client Integration Guide](../docs/integration-guide.md):** Learn how to connect your application, read/write data, and subscribe to real-time events.
-- **[Server Guide](../docs/server-guide.md):** Learn how to configure settings, manage API keys, and host the database.
+- **[Operator Guide](../docs/operator-guide.md):** Learn how to configure settings, manage API keys, and host the database.

@@ -81,7 +81,7 @@ func TestRealTimeSubscription(t *testing.T) {
 	}
 
 	jsonStr := strings.TrimPrefix(line, "data: ")
-	
+
 	var event store.Event
 	if err := json.Unmarshal([]byte(jsonStr), &event); err != nil {
 		t.Fatalf("failed to parse event JSON: %v", err)
@@ -96,7 +96,7 @@ func TestRealTimeSubscription(t *testing.T) {
 	if event.Collection != "testcol" {
 		t.Errorf("expected collection 'testcol', got '%s'", event.Collection)
 	}
-	
+
 	var docData map[string]interface{}
 	json.Unmarshal(event.Document, &docData)
 	if docData["test"] != "realtime" {

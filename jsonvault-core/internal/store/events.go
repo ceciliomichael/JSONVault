@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sync"
+	"time"
 )
 
 // Event represents a database mutation to be broadcast to subscribers.
@@ -157,7 +158,16 @@ func (s *Store) enqueueWebhook(event Event) {
 	case <-s.webhookStop:
 		return
 	default:
-		slog.Warn("webhook queue full; dropping event",
+		if event.Sequence == 0 || event.Action == "publish" {
+			slog.Warn("webhook queue full; dropping transient event",
+				"database", event.Database,
+				"collection", event.Collection,
+				"document_id", event.DocumentID,
+				"sequence", event.Sequence,
+			)
+			return
+		}
+		slog.Warn("webhook queue full; durable event will retry from outbox",
 			"database", event.Database,
 			"collection", event.Collection,
 			"document_id", event.DocumentID,
@@ -168,12 +178,20 @@ func (s *Store) enqueueWebhook(event Event) {
 
 func (s *Store) webhookWorker() {
 	defer s.webhookWG.Done()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-s.webhookStop:
 			return
 		case event := <-s.webhookQueue:
-			s.TriggerWebhooks(event)
+			if event.Sequence == 0 || event.Action == "publish" {
+				s.TriggerWebhooks(event)
+				continue
+			}
+			s.processWebhookOutboxForDatabase(event.Database)
+		case <-ticker.C:
+			s.processWebhookOutboxAllDatabases()
 		}
 	}
 }

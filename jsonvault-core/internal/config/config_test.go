@@ -14,6 +14,8 @@ var configEnvNames = []string{
 	"JSONVAULT_ADMIN_KEY",
 	"JSONVAULT_ADMIN_RATE_LIMIT_PER_MINUTE",
 	"JSONVAULT_ADDR",
+	"JSONVAULT_BACKUP_CONCURRENCY",
+	"JSONVAULT_BACKUP_TEMP_DIR",
 	"JSONVAULT_BASE_URL",
 	"JSONVAULT_DATA_DIR",
 	"JSONVAULT_ENCRYPTION_KEY",
@@ -21,6 +23,14 @@ var configEnvNames = []string{
 	"JSONVAULT_JWT_SECRET",
 	"JSONVAULT_CACHE_ENTRIES",
 	"JSONVAULT_MAX_BODY_BYTES",
+	"JSONVAULT_MAX_DOCUMENT_BYTES",
+	"JSONVAULT_MAX_HEADER_BYTES",
+	"JSONVAULT_MAX_QUERY_DURATION",
+	"JSONVAULT_MAX_QUERY_SCAN_BYTES",
+	"JSONVAULT_MAX_QUERY_SCAN_DOCS",
+	"JSONVAULT_MAX_RESPONSE_BYTES",
+	"JSONVAULT_PPROF_ADDR",
+	"JSONVAULT_PROFILE",
 	"JSONVAULT_READ_HEADER_TIMEOUT",
 	"JSONVAULT_READ_TIMEOUT",
 	"JSONVAULT_WRITE_TIMEOUT",
@@ -55,6 +65,9 @@ func TestLoadReadsDotEnvAndDefaults(t *testing.T) {
 	if cfg.Addr != ":8080" {
 		t.Fatalf("Addr = %q", cfg.Addr)
 	}
+	if cfg.MaxDocumentBytes != int(cfg.MaxBodyBytes) {
+		t.Fatalf("MaxDocumentBytes = %d, want %d", cfg.MaxDocumentBytes, cfg.MaxBodyBytes)
+	}
 }
 
 func TestLoadRequiresAPIKey(t *testing.T) {
@@ -88,6 +101,43 @@ func TestLoadRejectsInvalidAdminRateLimit(t *testing.T) {
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected invalid admin rate limit error")
+	}
+}
+
+func TestLoadTinyProfileDefaults(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("JSONVAULT_ENV_FILE", filepath.Join(t.TempDir(), "missing.env"))
+	t.Setenv("JSONVAULT_ADMIN_KEY", "admin_secret")
+	t.Setenv("JSONVAULT_JWT_SECRET", "jwt_secret")
+	t.Setenv("JSONVAULT_PROFILE", "tiny")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.CacheEntries != 8 {
+		t.Fatalf("CacheEntries = %d, want 8", cfg.CacheEntries)
+	}
+	if cfg.MaxBodyBytes != 1024*1024 {
+		t.Fatalf("MaxBodyBytes = %d, want 1MiB", cfg.MaxBodyBytes)
+	}
+	if cfg.MaxResponseBytes != 8*1024*1024 {
+		t.Fatalf("MaxResponseBytes = %d, want 8MiB", cfg.MaxResponseBytes)
+	}
+	if cfg.MaxQueryScanDocs != 5000 {
+		t.Fatalf("MaxQueryScanDocs = %d, want 5000", cfg.MaxQueryScanDocs)
+	}
+}
+
+func TestLoadRejectsInvalidProfile(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("JSONVAULT_ENV_FILE", filepath.Join(t.TempDir(), "missing.env"))
+	t.Setenv("JSONVAULT_ADMIN_KEY", "admin_secret")
+	t.Setenv("JSONVAULT_JWT_SECRET", "jwt_secret")
+	t.Setenv("JSONVAULT_PROFILE", "unknown")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected invalid profile error")
 	}
 }
 
