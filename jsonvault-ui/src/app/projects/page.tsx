@@ -1,10 +1,8 @@
 "use client";
 
 import {
-  BarChart3,
   Check,
   ChevronDown,
-  CircleDollarSign,
   CircleHelp,
   Database,
   Grid2X2,
@@ -14,12 +12,11 @@ import {
   MoreVertical,
   Plus,
   Search,
-  Settings,
-  Users,
-  Zap,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { BrandMark } from "@/components/BrandMark";
 import ProfileMenu from "@/components/ProfileMenu";
 import {
   Alert,
@@ -37,15 +34,6 @@ import {
 import { formatDate } from "@/lib/utils";
 
 type ProjectView = "grid" | "list";
-
-const railItems = [
-  { icon: LayoutGrid, label: "Projects", active: true },
-  { icon: Users, label: "Members" },
-  { icon: Grid2X2, label: "Organizations" },
-  { icon: BarChart3, label: "Usage" },
-  { icon: CircleDollarSign, label: "Billing" },
-  { icon: Settings, label: "Settings" },
-];
 
 export default function ProjectsPage() {
   const router = useRouter();
@@ -105,9 +93,7 @@ export default function ProjectsPage() {
       <header className="fixed top-0 left-0 right-0 z-30 h-12 border-b border-zinc-200 dark:border-white/5 bg-white/95 dark:bg-[#121212]/95 backdrop-blur">
         <div className="h-full flex items-center justify-between pl-3 pr-4">
           <div className="flex items-center gap-3">
-            <div className="w-6 h-6 rounded-md bg-emerald-500 flex items-center justify-center text-white shadow-sm">
-              <Zap size={15} fill="currentColor" strokeWidth={2.5} />
-            </div>
+            <BrandMark />
             <div className="h-5 w-px bg-zinc-200 dark:bg-white/10" />
             <button
               type="button"
@@ -146,24 +132,15 @@ export default function ProjectsPage() {
 
       <aside className="fixed top-12 left-0 bottom-0 z-20 w-12 border-r border-zinc-200 dark:border-white/5 bg-white dark:bg-[#121212]">
         <nav className="flex flex-col items-center gap-1 py-3">
-          {railItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.label}
-                type="button"
-                aria-label={item.label}
-                title={item.label}
-                className={`w-8 h-8 rounded-md flex items-center justify-center transition-colors ${
-                  item.active
-                    ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-950 dark:text-zinc-100"
-                    : "text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/70"
-                }`}
-              >
-                <Icon size={16} />
-              </button>
-            );
-          })}
+          <Link
+            href="/projects"
+            aria-current="page"
+            aria-label="Projects"
+            title="Projects"
+            className="w-8 h-8 rounded-md flex items-center justify-center bg-zinc-100 dark:bg-zinc-800 text-zinc-950 dark:text-zinc-100"
+          >
+            <LayoutGrid size={16} />
+          </Link>
         </nav>
       </aside>
 
@@ -252,14 +229,9 @@ export default function ProjectsPage() {
               >
                 <List size={16} />
               </button>
-              <button
-                type="button"
-                onClick={openCreate}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-400 text-emerald-950 text-[13px] font-medium hover:bg-emerald-300 transition-colors shadow-sm"
-              >
-                <Plus size={14} />
+              <PrimaryButton icon={Plus} onClick={openCreate}>
                 New project
-              </button>
+              </PrimaryButton>
             </div>
           </div>
 

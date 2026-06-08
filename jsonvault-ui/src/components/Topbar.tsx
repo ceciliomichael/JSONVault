@@ -8,10 +8,10 @@ import {
   Lightbulb,
   Search,
   Table2,
-  Zap,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { BrandMark } from "@/components/BrandMark";
 import ProfileMenu from "@/components/ProfileMenu";
 import { Badge, Dropdown, DropdownItem } from "./ui";
 
@@ -63,9 +63,7 @@ export default function Topbar({
   return (
     <header className="h-12 shrink-0 flex items-center justify-between gap-4 px-3 pr-4 bg-white dark:bg-[#121212] border-b border-zinc-200 dark:border-white/5">
       <div className="min-w-0 flex items-center gap-2">
-        <div className="w-6 h-6 rounded-md bg-emerald-500 flex items-center justify-center text-white shadow-sm shrink-0">
-          <Zap size={15} fill="currentColor" strokeWidth={2.5} />
-        </div>
+        <BrandMark />
         <span className="text-zinc-300 dark:text-zinc-700">/</span>
 
         <Dropdown

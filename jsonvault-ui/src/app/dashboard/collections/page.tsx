@@ -18,7 +18,6 @@ import { useDashboardMock } from "@/lib/mock-dashboard-store";
 export default function CollectionsPage() {
   const router = useRouter();
   const {
-    selectedDatabase,
     collections,
     setSelectedCollection,
     createCollection,
@@ -116,17 +115,7 @@ export default function CollectionsPage() {
   }
 
   return (
-    <WorkspacePage
-      title="Collections"
-      description={
-        <>
-          Manage document collections in{" "}
-          <span className="font-mono text-zinc-700 dark:text-zinc-300">
-            {selectedDatabase.name}
-          </span>
-        </>
-      }
-    >
+    <WorkspacePage title="Collections" hideHeader>
       {notice && (
         <ToastNotice
           message={notice}
