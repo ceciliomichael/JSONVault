@@ -24,11 +24,16 @@
     - Separate concerns: orchestration, domain logic, data access, validation, state, and presentation should not be mixed unnecessarily.
     - Keep entrypoints thin; move behavior into focused helpers, services, hooks, components, or modules.
     - Split by responsibility, lifecycle, data source, interaction behavior, or layout role; never justify a monolith because the task is simple.
+    - Prefer multiple focused files over very large files. Avoid creating or expanding 1000+ line files when the work can be split cleanly by responsibility.
     - Reuse existing helpers, utilities, shared types, and patterns before inventing new ones.
     - Favor explicit contracts: precise types, stable interfaces, and clear boundaries.
+    - Make invalid or unsafe states hard to represent through types, validation, constraints, and clear API boundaries.
     - Validate inputs at boundaries and handle invalid, missing, partial, or failed states deliberately.
+    - Treat security, data integrity, reliability, and performance as first-class requirements, not cleanup tasks.
+    - Consider operational impact: configuration, migrations, rollbacks, logging, observability, resource use, and failure recovery.
     - Prefer simple, correct solutions over clever ones.
     - Avoid over-engineering: do not complicate logic, abstractions, or file structure when a simpler maintainable design works.
+    - Prefer incremental, verifiable changes over large rewrites unless the user explicitly asks for a redesign.
     - Extract shared logic once repetition or coupling appears.
     - Keep code easy to test: isolate side effects, I/O, and mutable state.
     - Preserve backward compatibility unless a breaking change is explicitly requested.
@@ -40,8 +45,44 @@
       - A route or screen grows into multiple sections: keep the entrypoint as composition and move sections out.
       - A prompt or rule is duplicated in multiple places: dedupe to one source of truth.
       - A small change touches user input, storage, APIs, or tools: still validate boundaries and handle failure paths.
+      - A change touches auth, storage, payments, secrets, or destructive actions: explicitly check least privilege, failure behavior, and rollback/recovery needs.
+      - A feature can be built by extending an existing tested service: extend it instead of creating a parallel path.
     </examples>
   </engineering_principles>
+
+  <development_quality_practices description="How to keep implementation work production-grade.">
+    - These practices are language- and framework-agnostic; apply them to backend, frontend, database, tooling, documentation, and infrastructure work.
+    - Start from the source of truth: existing code, tests, docs, schemas, API contracts, and runtime behavior.
+    - Keep changes scoped. Avoid unrelated refactors, formatting churn, speculative rewrites, and accidental diff noise.
+    - Validate and normalize data at boundaries, then pass typed or structured values internally.
+    - Use least privilege and fail-closed behavior for auth, secrets, admin actions, file access, network calls, and destructive operations.
+    - Handle important failure paths deliberately: invalid input, empty states, unauthorized/forbidden, not found, conflicts, rate limits, timeouts, partial failures, and malformed responses.
+    - Update docs, examples, environment templates, and audit checklists when behavior, APIs, configuration, or user workflows change.
+    - Add or update tests for shared logic, data access, auth, persistence, API clients, cross-page UI behavior, or production-risk code.
+    - Run the relevant verification before completion. If something cannot be run, state exactly what was not run and why.
+    - Review the final diff for accidental edits, secrets, debug code, unrelated changes, and inaccurate checklist status.
+
+    <examples description="How to apply quality practices.">
+      - API client change: test success plus common Core errors, malformed responses, headers, and serialization.
+      - Auth or storage change: check least privilege, server-only secrets, concurrency, recovery, and rollback impact.
+    </examples>
+  </development_quality_practices>
+
+  <implementation_hygiene description="How to structure day-to-day code changes.">
+    - Apply these habits regardless of language, framework, runtime, or file type.
+    - Keep entrypoints thin and move behavior into focused helpers, services, hooks, components, or modules.
+    - Prefer multiple focused files over 1000+ line catch-all files when the work can be split cleanly.
+    - Do not duplicate business rules across UI, API clients, routes, and tests; create one reusable source when rules repeat.
+    - Prefer deterministic, testable functions for parsing, validation, authorization, transformations, and formatting.
+    - For async, stateful, or persistent systems, consider loading states, cancellation, retries, timeouts, ordering, idempotency, durability, and recovery where relevant.
+    - For user-facing UI, include realistic loading, empty, error, disabled, and permission-denied states.
+    - For security-sensitive work, never expose server-only secrets to browser-visible code and never use root/admin credentials where scoped credentials are sufficient.
+
+    <examples description="How to apply implementation hygiene.">
+      - Repeated permission checks: move them into a shared capability module and test the module once.
+      - A page starts making raw API calls: route those calls through a typed client/session layer.
+    </examples>
+  </implementation_hygiene>
 
   <request_modes description="How to respond based on the request type.">
     <question_or_explanation>
@@ -85,28 +126,62 @@
   </execution_rules>
 </system_contract>
 
-<JSONVault description="How to navigate JSONVault">
-JSONVault is a NoSQL Database
+<JSONVault description="Project context and repository map">
+JSONVault is a self-hosted NoSQL JSON document database. The product has two
+main parts: the Go database engine/API and the Next.js dashboard that manages
+and visualizes that engine.
 
-jsonvault-core/ - The Go server / Core Database Engine, the user will mention this as database.
-
-docs/ - The documentation part of jsonvault-core, contains integration-guide.md which is the API contract. Update as changes gets implemented.
+- `jsonvault-core/`: Go server and Core Database Engine.
+  - Treat this as the source of truth for storage behavior, authentication,
+    authorization, validation, API semantics, performance, and production
+    safety.
+  - When the user says "database", "core", "engine", or "server", assume this
+    directory unless the UI is explicitly mentioned.
+- `jsonvault-ui/`: Next.js dashboard for JSONVault Core.
+  - This is the developer-facing dashboard, similar in purpose to Supabase or
+    Firebase consoles.
+  - The UI must reflect real `jsonvault-core` capabilities only. Do not invent
+    dashboard features that Core cannot support.
+  - Integrate through a clear Core API/session/client layer. Do not spread raw
+    Core HTTP calls across pages.
+- `docs/`: root project documentation.
+  - `docs/integration-guide.md` is the API contract. Keep it aligned when Core
+    API behavior changes.
+  - `docs/audit/` contains production audits and implementation plans. Audit
+    plan files should stay traceable to their matching audit files.
 </JSONVault>
 
-<mcp>
-You must use the collect_feedback tool after every task that you do and wait for the user's feedback. The collect_feedback tool is your means of getting feedback from the user, and it will also act as a way to move to the next step. When you get the feedback from the user, you must use it to update the task and proceed to the next step. This is very important, so always use the collect_feedback tool after every task that you do. No matter what, even if user says the task is approved, you should always collect_feedback.
+<mcp description="Mandatory feedback workflow">
+Use the `collect_feedback` tool after every completed task, meaningful change,
+or audit phase, then wait for the user's feedback before moving on.
+
+When feedback is received, address it directly, update the work if needed, and
+call `collect_feedback` again. This loop is mandatory even when the user says
+the work is approved, because it is the handoff mechanism for the next task.
 </mcp>
 
 <current_system_goal>
-You must create the dashboard-ui.json located in root to the jsonvault-ui/ directory. Focus on UI first before we start integrating.
+Follow user
 </current_system_goal>
 
-<!-- BEGIN:nextjs-agent-rules -->
+<nextjs_agent_rules>
 # This is NOT the Next.js you know
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
-<!-- END:nextjs-agent-rules -->
+This project uses a Next.js version with breaking changes to APIs, conventions,
+and file structure. Before changing Next.js routes, server actions, route
+handlers, metadata, caching, or framework-specific behavior, read the relevant
+guide in `jsonvault-ui/node_modules/next/dist/docs/`. Follow local
+documentation and deprecation notices over training-memory assumptions.
+</nextjs_agent_rules>
 
-<design>
-Please use tailwind css.
-<design>
+<design description="Dashboard UI expectations">
+- Use Tailwind CSS for UI styling.
+- Build `jsonvault-ui` as a practical developer dashboard, not a marketing
+  landing page.
+- Keep the visual direction clean, restrained, and operational, in the spirit
+  of Supabase/Firebase dashboards.
+- Avoid gradient-heavy styling, decorative effects, and UI that implies
+  unavailable Core features.
+- Make pages consistent with established dashboard patterns and with the real
+  capabilities exposed by `jsonvault-core`.
+</design>

@@ -6,12 +6,10 @@ import {
   CircleHelp,
   Database,
   Lightbulb,
-  Plug,
   Search,
   Table2,
   Zap,
 } from "lucide-react";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import ProfileMenu from "@/components/ProfileMenu";
@@ -216,14 +214,6 @@ export default function Topbar({
             </Dropdown>
           </>
         )}
-
-        <Link
-          href="/connect"
-          className="hidden md:inline-flex items-center gap-2 h-8 px-3 rounded-full border border-zinc-200 dark:border-white/10 text-[12px] font-medium text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
-        >
-          <Plug size={13} />
-          Connect
-        </Link>
       </div>
 
       <div className="flex items-center gap-2 shrink-0">

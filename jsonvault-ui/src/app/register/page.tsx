@@ -1,9 +1,10 @@
 "use client";
 
-import { Eye, EyeOff, UserPlus } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { AuthShell } from "@/components/AuthShell";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -26,144 +27,113 @@ export default function RegisterPage() {
     }
     setError("");
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 300));
+    await new Promise((r) => setTimeout(r, 500));
     setLoading(false);
     router.push("/projects");
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
-      <div className="w-full max-w-sm">
-        {/* Logo */}
-        <div className="flex items-center gap-2.5 mb-8">
-          <div className="w-8 h-8 rounded-lg bg-green-700 flex items-center justify-center text-white font-black text-[15px] select-none">
-            JV
+    <AuthShell>
+      <h1 className="mb-1 text-[22px] font-semibold text-zinc-900 dark:text-zinc-100">
+        Create account
+      </h1>
+      <p className="mb-8 text-[13px] text-zinc-500">Sign up for your account</p>
+
+      <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
+        {error && (
+          <div className="rounded-md border border-red-500/20 bg-red-500/5 px-3.5 py-2.5 text-[12px] leading-relaxed text-red-500 dark:text-red-400">
+            {error}
           </div>
-          <div>
-            <div className="text-[17px] font-bold text-slate-900 leading-tight">
-              JSONVault
-            </div>
-            <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">
-              Dashboard
-            </div>
-          </div>
+        )}
+
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="name"
+            className="text-[12px] font-medium text-zinc-700 dark:text-zinc-300"
+          >
+            Name{" "}
+            <span className="font-normal text-zinc-400 dark:text-zinc-500">
+              (optional)
+            </span>
+          </label>
+          <input
+            id="name"
+            type="text"
+            autoComplete="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Your name"
+            className="w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-[13px] text-zinc-900 transition-colors placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:border-white/10 dark:bg-[#1a1a1a] dark:text-zinc-100"
+          />
         </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-8">
-          <h1 className="text-xl font-bold text-slate-900 mb-1">
-            Create account
-          </h1>
-          <p className="text-[13px] text-slate-500 mb-6">
-            Get started with JSONVault Dashboard.
-          </p>
-
-          <form
-            onSubmit={handleSubmit}
-            noValidate
-            className="flex flex-col gap-4"
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="email"
+            className="text-[12px] font-medium text-zinc-700 dark:text-zinc-300"
           >
-            {error && (
-              <div className="px-3 py-2.5 rounded-md bg-red-50 border border-red-200 text-red-800 text-[12px]">
-                {error}
-              </div>
-            )}
+            Email address
+          </label>
+          <input
+            id="email"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            className="w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-[13px] text-zinc-900 transition-colors placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:border-white/10 dark:bg-[#1a1a1a] dark:text-zinc-100"
+          />
+        </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="name"
-                className="text-[12px] font-semibold text-slate-700"
-              >
-                Name{" "}
-                <span className="text-slate-400 font-normal">(optional)</span>
-              </label>
-              <input
-                id="name"
-                type="text"
-                autoComplete="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Your name"
-                className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-md focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20 placeholder:text-slate-400"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="email"
-                className="text-[12px] font-semibold text-slate-700"
-              >
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-md focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20 placeholder:text-slate-400"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="password"
-                className="text-[12px] font-semibold text-slate-700"
-              >
-                Password
-              </label>
-              <div className="relative">
-                <input
-                  id="password"
-                  type={showPwd ? "text" : "password"}
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Min. 8 characters"
-                  className="w-full pl-3 pr-10 py-2 text-[13px] border border-slate-200 rounded-md focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20 placeholder:text-slate-400"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPwd(!showPwd)}
-                  aria-label={showPwd ? "Hide password" : "Show password"}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 transition-colors"
-                >
-                  {showPwd ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
-            </div>
-
-            <p className="text-[11px] text-slate-500">
-              By creating an account you agree to the terms of service. No
-              credit card required. We will not ask for your JSONVault JWT
-              secret or admin key during registration.
-            </p>
-
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="password"
+            className="text-[12px] font-medium text-zinc-700 dark:text-zinc-300"
+          >
+            Password
+          </label>
+          <div className="relative">
+            <input
+              id="password"
+              type={showPwd ? "text" : "password"}
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Min. 8 characters"
+              className="w-full rounded-md border border-zinc-200 bg-zinc-50 py-2.5 pl-3 pr-10 text-[13px] text-zinc-900 transition-colors placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:border-white/10 dark:bg-[#1a1a1a] dark:text-zinc-100"
+            />
             <button
-              type="submit"
-              disabled={loading}
-              className="w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-md bg-green-700 text-white text-sm font-semibold hover:bg-green-800 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              type="button"
+              onClick={() => setShowPwd(!showPwd)}
+              aria-label={showPwd ? "Hide password" : "Show password"}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-300"
             >
-              {loading ? (
-                <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <UserPlus size={15} />
-              )}
-              {loading ? "Checking…" : "Create account"}
+              {showPwd ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
-          </form>
+          </div>
         </div>
 
-        <p className="text-center text-[12px] text-slate-500 mt-4">
-          Already have an account?{" "}
-          <Link
-            href="/login"
-            className="text-green-700 font-semibold hover:underline"
-          >
-            Sign in
-          </Link>
-        </p>
-      </div>
-    </div>
+        <button
+          type="submit"
+          disabled={loading}
+          className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-md bg-zinc-900 px-4 py-2.5 text-[13px] font-medium text-white shadow-sm transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+        >
+          {loading && (
+            <span className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin dark:border-black/30 dark:border-t-black" />
+          )}
+          {loading ? "Creating account..." : "Create account"}
+        </button>
+      </form>
+
+      <p className="mt-6 text-center text-[12px] text-zinc-500">
+        Already have an account?{" "}
+        <Link
+          href="/login"
+          className="font-medium text-zinc-700 underline underline-offset-2 transition-colors hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white"
+        >
+          Sign in
+        </Link>
+      </p>
+    </AuthShell>
   );
 }
