@@ -7,6 +7,7 @@ import {
   validateCoreNameSegment,
 } from "./names";
 import type {
+  CancelOperationResult,
   CoreDocument,
   CoreRequestOptions,
   CreateApiKeyParams,
@@ -26,17 +27,28 @@ import type {
   GetDocumentParams,
   GetFTSParams,
   GetFTSResult,
+  GetPresenceResult,
   GetSchemaParams,
+  GetWebhooksParams,
+  GetWebhooksResult,
   ListCollectionsParams,
   ListDocumentsParams,
   ListDocumentsResult,
   ListIndexesParams,
   ListIndexesResult,
+  ListOperationsResult,
+  ListWebhookDeliveriesParams,
+  ListWebhookDeliveriesResult,
   MeResponse,
+  PublishEventResult,
+  RetryWebhookDeliveryParams,
+  RetryWebhookDeliveryResult,
   SetFTSParams,
   SetFTSResult,
   SetSchemaParams,
   SetSchemaResult,
+  SetWebhooksParams,
+  SetWebhooksResult,
   UpdateDocumentParams,
   ValidateSchemaParams,
   ValidateSchemaResult,
@@ -330,6 +342,56 @@ export class CoreClient {
     return (await parseResponseBody(response)) as T;
   }
 
+  async getWebhooks(params: GetWebhooksParams): Promise<GetWebhooksResult> {
+    validateCoreDatabaseName(params.database);
+    validateCoreCollectionName(params.collection);
+    const res = await this.fetchCore(
+      `/api/v1/${params.database}/${params.collection}/webhooks`,
+    );
+    return (await parseResponseBody(res)) as GetWebhooksResult;
+  }
+
+  async setWebhooks(params: SetWebhooksParams): Promise<SetWebhooksResult> {
+    validateCoreDatabaseName(params.database);
+    validateCoreCollectionName(params.collection);
+    const res = await this.fetchCore(
+      `/api/v1/${params.database}/${params.collection}/webhooks`,
+      {
+        method: "PUT",
+        body: { webhooks: params.webhooks },
+      },
+    );
+    return (await parseResponseBody(res)) as SetWebhooksResult;
+  }
+
+  async listWebhookDeliveries(
+    params: ListWebhookDeliveriesParams,
+  ): Promise<ListWebhookDeliveriesResult> {
+    validateCoreDatabaseName(params.database);
+    const url = new URL(
+      this.buildUrl(`/api/v1/admin/webhooks/${params.database}/deliveries`),
+    );
+    if (params.status) {
+      url.searchParams.set("status", params.status);
+    }
+    if (params.limit) {
+      url.searchParams.set("limit", params.limit.toString());
+    }
+    const res = await this.fetchCore(url.pathname + url.search);
+    return (await parseResponseBody(res)) as ListWebhookDeliveriesResult;
+  }
+
+  async retryWebhookDelivery(
+    params: RetryWebhookDeliveryParams,
+  ): Promise<RetryWebhookDeliveryResult> {
+    validateCoreDatabaseName(params.database);
+    const res = await this.fetchCore(
+      `/api/v1/admin/webhooks/${params.database}/deliveries/${params.sequence}/retry`,
+      { method: "POST" },
+    );
+    return (await parseResponseBody(res)) as RetryWebhookDeliveryResult;
+  }
+
   private async fetchCore(
     path: string,
     options: CoreRequestOptions = {},
@@ -356,6 +418,43 @@ export class CoreClient {
     }
 
     return response;
+  }
+
+  async listOperations(): Promise<ListOperationsResult> {
+    return this.request<ListOperationsResult>("/api/v1/operations", {
+      method: "GET",
+    });
+  }
+
+  async cancelOperation(operationId: string): Promise<CancelOperationResult> {
+    return this.request<CancelOperationResult>(
+      `/api/v1/operations/${encodeURIComponent(operationId)}/cancel`,
+      { method: "POST" },
+    );
+  }
+
+  async getPresence(
+    database: string,
+    collection: string,
+  ): Promise<GetPresenceResult> {
+    return this.request<GetPresenceResult>(
+      `/api/v1/${encodeURIComponent(database)}/${encodeURIComponent(collection)}/presence`,
+      { method: "GET" },
+    );
+  }
+
+  async publishEvent(
+    database: string,
+    collection: string,
+    payload: string,
+  ): Promise<PublishEventResult> {
+    return this.request<PublishEventResult>(
+      `/api/v1/${encodeURIComponent(database)}/${encodeURIComponent(collection)}/publish`,
+      {
+        method: "POST",
+        body: payload,
+      },
+    );
   }
 
   private buildUrl(path: string): string {

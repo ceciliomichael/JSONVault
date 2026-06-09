@@ -16,8 +16,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   type FormEvent,
+  useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useTransition,
 } from "react";
@@ -120,6 +122,45 @@ export default function DataClient({
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => pageIds.includes(id)));
   }, [pageIds]);
+
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const throttledRefresh = useCallback(() => {
+    if (refreshTimeoutRef.current) return;
+    refreshTimeoutRef.current = setTimeout(() => {
+      router.refresh();
+      refreshTimeoutRef.current = null;
+    }, 500);
+  }, [router]);
+
+  useEffect(() => {
+    if (!selectedCollection) return;
+
+    const url = `/api/realtime/${encodeURIComponent(database)}/${encodeURIComponent(selectedCollection)}/subscribe`;
+    const es = new EventSource(url);
+
+    es.onmessage = (e) => {
+      if (e.data === ": keepalive") return;
+      try {
+        const payload = JSON.parse(e.data);
+        if (
+          ["insert", "update", "delete", "publish"].includes(payload.action)
+        ) {
+          throttledRefresh();
+        }
+      } catch (_err) {
+        // Ignore parse errors from unknown events
+      }
+    };
+
+    return () => {
+      es.close();
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+        refreshTimeoutRef.current = null;
+      }
+    };
+  }, [database, selectedCollection, throttledRefresh]);
 
   function buildHref(overrides: {
     collection?: string;
@@ -434,7 +475,9 @@ export default function DataClient({
                 ))}
               </tr>
             </thead>
-            <tbody className={`divide-y divide-zinc-100 dark:divide-white/5 ${selectedCollection && documents.length > 0 ? "border-b border-zinc-100 dark:border-white/5" : ""}`}>
+            <tbody
+              className={`divide-y divide-zinc-100 dark:divide-white/5 ${selectedCollection && documents.length > 0 ? "border-b border-zinc-100 dark:border-white/5" : ""}`}
+            >
               {!selectedCollection ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-16">

@@ -531,9 +531,9 @@ foundation should stay thin and grow as each page needs real Core behavior.
 - [x] **Indexes page**: manage indexes for the selected collection.
 - [x] **Search page**: manage FTS fields and test search for the selected
       collection.
-- [ ] **Webhooks page**: manage collection webhook targets and delivery states.
-- [ ] **Operations page**: list/cancel permitted Core operations.
-- [ ] **Realtime page**: connect to real SSE/presence/publish behavior through a
+- [x] **Webhooks page**: manage collection webhook targets and delivery states.
+- [x] **Operations page**: list/cancel permitted Core operations.
+- [x] **Realtime page**: connect to real SSE/presence/publish behavior through a
       safe auth boundary.
 - [ ] **Docs and cleanup**: env examples, setup docs, mock-mode cleanup, and
       final full-flow verification.
@@ -643,19 +643,19 @@ follows the page slice order above.
 
 ### Phase 7: Realtime
 
-- [ ] Use a fetch-based SSE client or UI server proxy because native
+- [x] Use a fetch-based SSE client or UI server proxy because native
       `EventSource` cannot set `Authorization` headers.
-- [ ] Never put Bearer tokens in query strings.
-- [ ] Support `Last-Event-ID` or `last_event_id` replay.
-- [ ] Show real connection state only when an actual stream is open.
+- [x] Never put Bearer tokens in query strings.
+- [x] Support `Last-Event-ID` or `last_event_id` replay.
+- [x] Show real connection state only when an actual stream is open.
 
 ### Phase 8: Docs And Operator UX
 
 - [x] Update `jsonvault-ui/.env.example` with comments explaining each env var.
-- [ ] Add a UI setup doc with the operator curl flow.
-- [ ] Document which capabilities are required for each dashboard section.
-- [ ] Document the limitation around one-database `project_admin` tokens.
-- [ ] Keep `docs/integration-guide.md` focused on app developers, not server
+- [x] Add a UI setup doc with the operator curl flow.
+- [x] Document which capabilities are required for each dashboard section.
+- [x] Document the limitation around one-database `project_admin` tokens.
+- [x] Keep `docs/integration-guide.md` focused on app developers, not server
       env setup.
 
 ### Phase 9: Verification

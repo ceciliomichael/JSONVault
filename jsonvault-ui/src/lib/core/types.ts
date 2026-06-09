@@ -207,3 +207,103 @@ export interface CoreRequestOptions {
   signal?: AbortSignal;
   cache?: RequestCache;
 }
+
+export interface WebhookConfig {
+  url: string;
+  events: string[];
+}
+
+export interface WebhookDelivery {
+  sequence: number | string;
+  event: Record<string, unknown>;
+  status: string;
+  attempts: number;
+  next_attempt_at?: number;
+  last_error?: string;
+  updated_at: number;
+}
+
+export interface GetWebhooksParams {
+  database: string;
+  collection: string;
+}
+
+export interface GetWebhooksResult {
+  webhooks: WebhookConfig[];
+}
+
+export interface SetWebhooksParams {
+  database: string;
+  collection: string;
+  webhooks: WebhookConfig[];
+}
+
+export interface SetWebhooksResult {
+  updated: boolean;
+  webhook_secret: string;
+}
+
+export interface ListWebhookDeliveriesParams {
+  database: string;
+  status?: string;
+  limit?: number;
+}
+
+export interface ListWebhookDeliveriesResult {
+  deliveries: WebhookDelivery[];
+}
+
+export interface RetryWebhookDeliveryParams {
+  database: string;
+  sequence: string | number;
+}
+
+export interface RetryWebhookDeliveryResult {
+  retry: boolean;
+  sequence: string | number;
+}
+
+export type OperationState =
+  | "queued"
+  | "running"
+  | "ready"
+  | "failed"
+  | "canceling"
+  | "canceled";
+
+export interface OperationRecord {
+  operation_id: string;
+  type: string;
+  database: string;
+  collection?: string;
+  field?: string;
+  state: OperationState;
+  progress: number;
+  actor: string;
+  created_at: string;
+  updated_at: string;
+  last_error?: string;
+  cancellable: boolean;
+}
+
+export interface ListOperationsResult {
+  operations: OperationRecord[];
+}
+
+export interface CancelOperationResult {
+  operation_id: string;
+  state: OperationState;
+  updated_at: string;
+}
+
+export interface GetPresenceResult {
+  database: string;
+  collection: string;
+  subscribers: number;
+}
+
+export interface PublishEventResult {
+  published: boolean;
+  database: string;
+  collection: string;
+}

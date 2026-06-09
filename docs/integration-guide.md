@@ -98,6 +98,9 @@ Open a persistent HTTP connection to receive live document mutations.
   data: {"sequence":3,"action":"delete","database":"{db}","collection":"{coll}","document_id":"<id>"}
   id: 3
   ```
+
+> [!WARNING]
+> **The Delete Quirk:** Notice that the `delete` action payload completely omits the `document` object. When parsing SSE events, always rely on `event.document_id` to identify the document that was deleted, otherwise your application will crash trying to read `event.document.id`.
 Use the standard `Last-Event-ID` header, or `?last_event_id=<sequence>`, to replay retained committed document events after reconnecting. Transient `publish` messages are not stored and cannot be replayed.
 
 *(Note: To prevent proxies from dropping idle connections, JSONVault sends a silent `: keepalive` comment every 15 seconds. Standard EventSource clients handle this automatically. If a subscriber falls behind, JSONVault closes the stream; clients should reconnect with the last event ID.)*

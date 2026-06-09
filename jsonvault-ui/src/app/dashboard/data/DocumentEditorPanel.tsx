@@ -264,7 +264,9 @@ function DocumentFieldEditor({
             ))}
           </tr>
         </thead>
-        <tbody className={`divide-y divide-zinc-100 dark:divide-white/5 ${fields.length > 0 ? "border-b border-zinc-100 dark:border-white/5" : ""}`}>
+        <tbody
+          className={`divide-y divide-zinc-100 dark:divide-white/5 ${fields.length > 0 ? "border-b border-zinc-100 dark:border-white/5" : ""}`}
+        >
           {fields.length === 0 ? (
             <tr>
               <td colSpan={4} className="px-6 py-10 text-center text-zinc-500">

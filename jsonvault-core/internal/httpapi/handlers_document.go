@@ -126,7 +126,11 @@ func (s *Server) handleCollectionDocuments(c *gin.Context) {
 			})
 			return
 		}
-		c.JSON(http.StatusOK, result.Documents)
+		docs := result.Documents
+		if docs == nil {
+			docs = []store.Document{}
+		}
+		c.JSON(http.StatusOK, docs)
 	case http.MethodPost:
 		if !s.hasScope(c, auth.ScopeReadWrite) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})

@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/ThemeProvider";
-import { DashboardMockProvider } from "@/lib/mock-dashboard-store";
 import "./globals.css";
 
 const inter = Inter({
@@ -43,7 +42,9 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <DashboardMockProvider>{children}</DashboardMockProvider>
+          <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-[#121212]">
+            {children}
+          </main>
         </ThemeProvider>
       </body>
     </html>

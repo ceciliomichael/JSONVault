@@ -410,3 +410,55 @@ Only keys with the `admin` scope can trigger raw database backups.
 - **Temp Directory**: Backup snapshots use `JSONVAULT_BACKUP_TEMP_DIR`, defaulting to `JSONVAULT_DATA_DIR/_tmp/backups`.
 - **Space Check**: JSONVault checks available space before snapshotting and rejects the backup if the temp directory cannot hold the snapshot plus margin.
 - **Concurrency**: Backups are concurrency-limited by `JSONVAULT_BACKUP_CONCURRENCY`.
+
+## 7. Dashboard UI Setup
+
+The JSONVault developer dashboard (`jsonvault-ui`) is a Next.js application that sits in front of `jsonvault-core`. It manages its own state using your Core instance, meaning your users, projects, and dashboard configurations are stored securely inside the database itself.
+
+### UI Environment Variables
+Configure `jsonvault-ui/.env` (use `.env.example` as a baseline) to point to your hosted Core backend:
+
+```env
+# URL to the JSONVault Core instance
+JSONVAULT_API_BASE_URL=http://localhost:8080
+
+# The JWT secret used by Core. The UI needs this to verify/mint tokens if configured to do so.
+JSONVAULT_JWT_SECRET=your-core-jwt-secret
+
+# A secure random string used strictly to encrypt the UI's HTTP-only cookies
+JSONVAULT_DASHBOARD_SESSION_SECRET=your-ui-session-secret
+
+# Core storage locations for dashboard user credentials
+JSONVAULT_DASHBOARD_AUTH_DATABASE=jsonvault_dashboard
+JSONVAULT_DASHBOARD_AUTH_COLLECTION=dashboard_users
+```
+
+### Minting the Dashboard Admin Token
+The UI server needs a `JSONVAULT_API_KEY` to read and write its own configuration. 
+Because the dashboard itself manages multiple projects, it needs an API Key that acts as a `project_admin` for the `jsonvault_dashboard` database.
+
+You (the Operator) must mint this initial token using your core `JSONVAULT_ADMIN_KEY`. Run the following `curl` command against your Core instance:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/admin/keys \
+  -H "Authorization: Bearer <JSONVAULT_ADMIN_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "project_admin",
+    "database": "jsonvault_dashboard",
+    "collection": "*",
+    "capabilities": ["metadata:read", "documents:read", "documents:write", "collections:manage"],
+    "expires_in": "8760h"
+  }'
+```
+
+Copy the resulting `token` and set it as `JSONVAULT_API_KEY` in the `jsonvault-ui/.env` file.
+
+### Capability Requirements & Token Limitations
+Different sections of the dashboard require specific capabilities within the token:
+- **Data (Documents)**: `documents:read`, `documents:write`
+- **Collections**: `collections:manage`
+- **Schemas, Indexes, FTS, Webhooks**: Requires `project_admin` scope with `metadata:read` and explicit `*:manage` capabilities depending on the section.
+
+> [!WARNING]
+> **Token Constraints:** The `project_admin` token structure is currently constrained to a single database. This means a single `jsonvault-ui` deployment natively manages projects only within that assigned dashboard database. True multi-tenant deployment across multiple distinct core databases requires an external operator gateway to dispatch requests.

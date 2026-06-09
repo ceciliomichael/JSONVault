@@ -35,6 +35,9 @@ func (s *Server) handleListWebhookDeliveries(c *gin.Context) {
 		s.handleStoreError(c, err)
 		return
 	}
+	if deliveries == nil {
+		deliveries = []store.WebhookDelivery{}
+	}
 	c.JSON(http.StatusOK, gin.H{"deliveries": deliveries})
 }
 
@@ -105,8 +108,13 @@ func (s *Server) handleGetWebhooks(c *gin.Context) {
 		return
 	}
 
+	webhooks := record.Webhooks
+	if webhooks == nil {
+		webhooks = []store.WebhookConfig{}
+	}
+
 	// We ONLY return the webhooks, NOT the secret. The secret is only returned ONCE upon setting.
 	c.JSON(http.StatusOK, gin.H{
-		"webhooks": record.Webhooks,
+		"webhooks": webhooks,
 	})
 }

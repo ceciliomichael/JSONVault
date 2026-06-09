@@ -2,7 +2,7 @@
 
 import { Plus, Search, Table2 } from "lucide-react";
 import Link from "next/link";
-import type { MockCollection } from "@/lib/mock-dashboard-store";
+
 import { PrimaryButton } from "./ui";
 
 export function WorkspacePage({
@@ -77,7 +77,7 @@ export function CollectionTabs({
   selectedCollection,
   onSelect,
 }: {
-  collections: MockCollection[];
+  collections: { name: string }[];
   selectedCollection: string;
   onSelect: (collection: string) => void;
 }) {
@@ -116,7 +116,7 @@ export function CollectionPanel({
   onSearch,
 }: {
   title?: string;
-  collections: MockCollection[];
+  collections: { name: string }[];
   selectedCollection: string;
   onSelect: (collection: string) => void;
   search: string;

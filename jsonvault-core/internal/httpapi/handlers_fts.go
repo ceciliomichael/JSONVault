@@ -37,7 +37,11 @@ func (s *Server) handleGetFTSConfig(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"configured": false, "fields": []string{}, "state": "none"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"configured": true, "fields": config.Fields, "state": "ready"})
+	fields := config.Fields
+	if fields == nil {
+		fields = []string{}
+	}
+	c.JSON(http.StatusOK, gin.H{"configured": true, "fields": fields, "state": "ready"})
 }
 
 func (s *Server) handleSetFTSConfig(c *gin.Context) {
