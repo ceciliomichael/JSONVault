@@ -434,7 +434,7 @@ export default function DataClient({
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-100 border-b border-zinc-100 dark:divide-white/5 dark:border-white/5">
+            <tbody className={`divide-y divide-zinc-100 dark:divide-white/5 ${selectedCollection && documents.length > 0 ? "border-b border-zinc-100 dark:border-white/5" : ""}`}>
               {!selectedCollection ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-16">

@@ -42,9 +42,11 @@ export function WorkspacePage({
 
 export function WorkspaceTable({
   headings,
+  hasItems = true,
   children,
 }: {
   headings: string[];
+  hasItems?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -62,7 +64,7 @@ export function WorkspaceTable({
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-zinc-100 border-b border-zinc-100 dark:divide-white/5 dark:border-white/5">
+        <tbody className={`divide-y divide-zinc-100 dark:divide-white/5 ${hasItems ? "border-b border-zinc-100 dark:border-white/5" : ""}`}>
           {children}
         </tbody>
       </table>

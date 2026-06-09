@@ -250,7 +250,7 @@ export default function OperationsPage() {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-100 border-b border-zinc-100 dark:divide-white/5 dark:border-white/5">
+            <tbody className={`divide-y divide-zinc-100 dark:divide-white/5 ${visibleOperations.length > 0 ? "border-b border-zinc-100 dark:border-white/5" : ""}`}>
               {operations.length === 0 ? (
                 <tr>
                   <td
