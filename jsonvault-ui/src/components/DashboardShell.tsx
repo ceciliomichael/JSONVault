@@ -4,39 +4,39 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
-import { useDashboardMock } from "@/lib/mock-dashboard-store";
+import type { DashboardProject } from "@/lib/projects";
+import type { MeResponse } from "@/lib/types";
 
-export default function DashboardShell({ children }: { children: ReactNode }) {
+export default function DashboardShell({
+  children,
+  me,
+  project,
+  userEmail,
+  userName,
+}: {
+  children: ReactNode;
+  me: MeResponse | null;
+  project: DashboardProject;
+  userEmail: string;
+  userName?: string;
+}) {
   const pathname = usePathname();
-  const {
-    state,
-    selectedDatabase,
-    selectedCollection,
-    collections,
-    setSelectedDb,
-    setSelectedCollection,
-  } = useDashboardMock();
-  const databaseLabels = Object.fromEntries(
-    Object.values(state.databases).map((database) => [
-      database.name,
-      database.displayName ?? database.name,
-    ]),
-  );
+  const databaseLabels = { [project.database]: project.displayName };
   const fullBleed = pathname !== "/dashboard";
 
   return (
     <div className="h-screen overflow-hidden bg-white dark:bg-[#121212]">
       <Topbar
-        databases={Object.keys(state.databases).sort()}
+        databases={[project.database]}
         databaseLabels={databaseLabels}
-        collections={collections.map((collection) => collection.name)}
-        selectedDb={selectedDatabase.name}
-        selectedCollection={selectedCollection.name}
-        onDbChange={setSelectedDb}
-        onCollectionChange={setSelectedCollection}
+        collections={[]}
+        selectedDb={project.database}
+        selectedCollection=""
+        userEmail={userEmail}
+        userName={userName}
       />
       <div className="flex h-[calc(100vh-3rem)] overflow-hidden">
-        <Sidebar me={state.me} />
+        <Sidebar me={me} />
         <main
           className={`flex-1 min-w-0 bg-white dark:bg-[#121212] ${
             fullBleed

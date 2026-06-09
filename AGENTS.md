@@ -161,7 +161,7 @@ the work is approved, because it is the handoff mechanism for the next task.
 </mcp>
 
 <current_system_goal>
-Follow user
+Follow user and finish the docs/plan/plan-001.md
 </current_system_goal>
 
 <nextjs_agent_rules>

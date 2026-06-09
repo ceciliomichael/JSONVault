@@ -1,344 +1,691 @@
-# Plan 001: JSONVault Dashboard Mock-Mode Reliability Pass
+# Plan 001: Core-Backed JSONVault Dashboard Integration
 
 Status: draft for user approval
 Created: 2026-06-07
+Updated: 2026-06-09
 Target project: `jsonvault-ui`
-Reference guide: `jsonvault-ui/dashboard-ui.json`
+Core source of truth: `jsonvault-core`
+Reference docs:
+
+- `docs/integration-guide.md`
+- `docs/admin-guide.md`
+- `docs/operator-guide.md`
+- `jsonvault-ui/.env.example`
+- `jsonvault-ui/dashboard-ui.json`
 
 ## Purpose
 
-Make the dashboard feel production-grade even while it is still running in mock mode.
+Move `jsonvault-ui` from mock-preview behavior toward a real self-hosted
+dashboard that uses `jsonvault-core` like a normal trusted API client.
 
-The goal is not to wire every screen to `jsonvault-core` yet. The goal is to make each screen work end-to-end from a user's point of view, with realistic JSONVault behavior, safe copy, no fake technical clutter, and page flows that match what `jsonvault-core` actually supports.
+The dashboard should not invent a separate storage or auth model. It should use
+Core REST APIs, Core Bearer tokens, Core database/collection/document behavior,
+and Core capability rules. The operator hosts both Core and UI, generates the
+dashboard API key from Core, and configures the UI with server-only environment
+variables.
 
-## Main Decisions To Approve
+This supersedes the earlier mock-mode reliability plan in this file. Mock mode
+can remain useful during development, but the product direction is now
+Core-backed.
 
-- Use a shared mock dashboard data layer instead of separate hard-coded arrays on every page.
-- Let mock actions mutate local UI state so buttons visibly work during testing.
-- Persist mock state in browser local storage so refreshes do not immediately reset the flow.
-- Keep the UI easy for normal users, but keep core details such as ETags, operation IDs, capabilities, and API routes available in quieter "details" or "advanced" areas.
-- Treat schemas, indexes, FTS, webhooks, documents, and realtime as collection-scoped features because `jsonvault-core` models them under `/{database}/{collection}`.
-- Use user-facing words first, with exact technical names only where they help debugging or integration.
-- Do not use gradients, decorative blobs, hero marketing layouts, or fake analytics.
+## Current Implementation Status
 
-## Non-Goals
+- Execution mode: page-by-page vertical slices.
+- Current slice: API keys page redacted metadata inventory complete; awaiting
+  feedback before schemas page.
+- Last completed slice: API keys page runtime key generation stores and
+  displays dashboard-owned non-secret key metadata while the full generated
+  token remains one-time only.
+- Next slice after current: schemas page.
+- Last verification: targeted Biome checks, `npx tsc --noEmit`, and
+  `npm run build` on 2026-06-09; JSONVault UI dev server verified at
+  `http://localhost:3000`; project deletion smoke-checked by rendering a Core
+  project card delete affordance after adding typed-name confirmation, deleting
+  a temporary Core `dashboard_projects` record, and verifying `404` after
+  delete; `/dashboard` redesigned in a Supabase-style project overview and
+  smoke-checked with a signed dashboard session selecting a temporary project
+  and a server-minted project manager token, including selected-project render,
+  primary database panel, get-connected section, project feature section,
+  `Collections` labels instead of `Tables`, no unsupported `Framework`, `MCP`,
+  `Advisor`, `Reports`, or `Total Requests` labels, no `Core request failed`,
+  no `resource not found`, no locked collections action, and cleanup;
+  `/dashboard/collections` smoke-checked with a signed dashboard session
+  selecting a temporary project, a real Core collection, and one document,
+  including collection render, document/API path columns, no empty state, no
+  Core request failure text, and cleanup of the temporary collection and
+  dashboard project record; `/dashboard/data` smoke-checked with a signed
+  dashboard session selecting a temporary project, a real Core collection, and
+  two real documents, including selected collection render, document/ETag
+  columns, create action, pagination total, no empty state, no Core request
+  failure text, and cleanup of the temporary collection and dashboard project
+  record; empty-state/cursor feedback smoke-checked with an empty selected
+  project on `/dashboard/collections` and `/dashboard/data`, including rendered
+  empty states, divider-based table bodies, global enabled-button pointer
+  cursor rule, no old row-border class, and cleanup of the temporary dashboard
+  project record; `/dashboard/keys` smoke-checked with a signed dashboard
+  session selecting a temporary project and real Core collection, including
+  selected database render, collection scope option, read/write and read-only
+  runtime key choices, one-time key warning, no fake key inventory, no
+  project-admin key option, no Core request failure text, and cleanup of the
+  temporary collection and dashboard project record; Core `POST /api/v1/admin/keys`
+  verified with the selected project's manager token by minting a real
+  `read_only` collection-scoped key; API keys feedback correction smoke-checked
+  restored toolbar/table empty state/side-panel trigger on `/dashboard/keys`,
+  including selected database render, collection option, no full-access key UI,
+  no fake persisted key inventory text, no Core request failure text, and
+  cleanup of the temporary collection and dashboard project record; API key
+  metadata inventory smoke-checked with temporary dashboard project/key metadata
+  records on `/dashboard/keys`, including stored five-character token prefix,
+  token ID, scope, database, collection, no old Core inventory disclaimer, no
+  full token in the rendered table, and cleanup of the temporary metadata,
+  project, and collection records.
 
-- Do not build real user account auth in this pass.
-- Do not connect every page to live `jsonvault-core` APIs in this pass.
-- Do not add billing, teams, invitations, restore upload, or unsupported server settings.
-- Do not expose `JSONVAULT_ADMIN_KEY` or `JSONVAULT_JWT_SECRET` to normal dashboard users.
+Update this section after each completed slice so the current phase, completed
+work, next page, and verification status remain visible.
 
-## Current Problems Found
+## Implementation Scope
 
-- Many pages use page-local constants such as `MOCK_DOCS`, `MOCK_COLLECTIONS`, `MOCK_INDEXES`, and `MOCK_OPS`, so actions on one page do not affect related pages.
-- Some primary buttons do nothing in mock mode, including create document, save schema, save webhook target, create index, save FTS config, revoke key, retry delivery, cancel operation, and create project.
-- The document edit modal shows technical copy too loudly: `This document is protected against concurrent edits. Version: "..."`
-- Schemas are presented like one global editor, but core schema endpoints are per database and collection.
-- Indexes, FTS, webhooks, realtime, and documents also need a consistent selected collection context.
-- Some mock messages say "not connected yet" even when the user wants a fully testable mock flow.
-- Mock dashboard stats can drift from the actual mock page data.
-- Realtime has simulated connection behavior, but it should be clearly realistic and should not claim a real server stream is open unless connected later.
-- Technical details such as capabilities, ETags, operation IDs, and endpoint routes are useful, but should be shown as secondary details rather than blocking alerts.
-- Some accessibility and lint issues remain around labels, static click handlers, dropdown behavior, and modal semantics.
+If this plan is fully implemented, `jsonvault-ui` should become a functional
+dashboard backed by `jsonvault-core`.
 
-## Core Alignment Rules
+Functional means:
 
-| Area | Core behavior to match | Dashboard mock behavior |
-| --- | --- | --- |
-| Documents | `GET/POST/PUT/PATCH/DELETE /api/v1/{database}/{collection}` | Create, edit, delete, filter, paginate, and select documents in the selected collection. |
-| ETags | Used for safe concurrent updates | Hide raw ETag from primary copy; show "change protection" and expose ETag in document details. |
-| Collections | `GET/POST/DELETE /api/v1/{database}/collections` | Create/delete collections; deleting a collection removes related mock docs, indexes, schema, FTS, and webhooks. |
-| Indexes | `GET/POST/DELETE /api/v1/{database}/{collection}/indexes` | Manage indexes per selected collection; async create creates a mock operation. |
-| FTS | `GET/POST /api/v1/{database}/{collection}/fts` | Manage searchable fields per selected collection; saving creates a mock rebuild operation. Saving an empty field list is not supported by the current core handler. |
-| Schemas | `GET /schema`, `POST /schema/validate`, `PUT /schema`, `DELETE /schema` under `/{database}/{collection}` | Select a collection, edit that collection schema, validate schema format, save, and delete. |
-| Webhooks | `GET/PUT /api/v1/{database}/{collection}/webhooks` | Manage targets per selected collection; show one-time mock secret on save. |
-| Deliveries | `GET /api/v1/admin/webhooks/{database}/deliveries`, `POST /api/v1/admin/webhooks/{database}/deliveries/{sequence}/retry` | Show realistic database-level delivery records and allow failed deliveries to retry in mock state; filter by selected collection in the UI when useful. |
-| Operations | `GET /api/v1/operations`, cancel where permitted | Show operations from mock actions; cancel running operations. |
-| API keys | `POST /api/v1/admin/keys`, `DELETE /api/v1/admin/keys/{jti}` | Generate mock read-only/read-write app keys in the API Keys page. Project owner keys and revocation are admin/operator flows in core. |
-| Realtime | SSE subscribe, presence, transient publish | Simulate start/stop, presence count, document events, publish events, and replay explanation. |
-| Admin | Root admin only | Keep platform actions isolated and clearly operator-only. |
+- login, register, logout, and dashboard sessions work against Core-backed
+  storage;
+- dashboard users are stored as JSON documents in the configured dashboard auth
+  database/collection;
+- projects are real dashboard records that point to real Core databases;
+- project creation creates or prepares the matching Core database path;
+- project selection drives the existing dashboard pages;
+- documents, collections, indexes, search, schemas, webhooks, operations,
+  realtime, and API keys use real Core endpoints where Core supports them;
+- UI actions are enabled or hidden based on `GET /api/v1/me` scope and
+  capabilities;
+- mock mode is no longer the default for the covered flows.
 
-## Verified Core Findings
+This is not a UI redesign plan. The existing dashboard UI, routes, layout,
+visual style, and page structure should stay intact. Implementation work should
+wire the current UI to real data and real server actions. UI changes are allowed
+only when required for real data states, loading/error/empty states, permission
+states, or to remove mock-only behavior.
 
-- Schemas are per collection, not global. The route includes both database and collection: `/api/v1/{database}/{collection}/schema`.
-- A schema can be read by tokens with `metadata:read` or document read access for that resource.
-- Schema validation and mutation require `schemas:manage`.
-- `POST /api/v1/{database}/{collection}/schema/validate` validates the schema document itself. It does not validate an example document against a schema.
-- `PUT /api/v1/{database}/{collection}/schema` stores a valid JSON Schema and compresses it to normalized JSON.
-- `DELETE /api/v1/{database}/{collection}/schema` removes only that collection's schema.
-- `SetSchema` requires the collection bucket to already exist. The dashboard should create/select a collection before saving a schema for it.
-- Stored schemas are enforced on document create, put, patch, transaction put, and transaction patch.
-- Existing documents are not retroactively rejected when a schema is saved.
-- Deleting a collection removes its schema, index metadata, FTS config, webhooks, TTL metadata, and collection count.
-- FTS config is collection-scoped and currently uses `POST /api/v1/{database}/{collection}/fts` to save fields.
-- The FTS handler rejects an empty `fields` array, so "clear all FTS fields" is not a supported save action unless core adds a delete/clear endpoint.
-- Webhook targets are collection-scoped, but webhook delivery inspection is database-level and each delivery embeds the event collection.
-- Project users with `keys:manage` can mint only `read_only` and `read_write` runtime keys within their token constraints. Only admin can mint `project_admin` keys or revoke keys through the current API.
+## Vision
+
+Self-hosted operator flow:
+
+1. The operator runs `jsonvault-core`.
+2. The operator configures Core with `JSONVAULT_ADMIN_KEY` and
+   `JSONVAULT_JWT_SECRET`.
+3. The operator generates a Core API key/JWT with curl or another trusted tool
+   for the dashboard metadata database.
+4. The operator puts that generated metadata key into `jsonvault-ui/.env` as
+   `JSONVAULT_API_KEY`.
+5. The operator configures `JSONVAULT_API_BASE_URL` to point to Core.
+6. The UI `JSONVAULT_JWT_SECRET` must match Core's `JSONVAULT_JWT_SECRET` so
+   the UI server can mint short-lived, server-only project manager tokens for
+   selected project databases.
+7. The UI server talks to Core with `Authorization: Bearer <token>`, using the
+   metadata key for dashboard-owned records and server-minted project manager
+   tokens for selected project database operations.
+8. Browser code talks to the UI server, not directly to Core secrets.
+
+The dashboard itself should store dashboard data in Core. For example,
+dashboard auth users can live in:
+
+- database: `JSONVAULT_DASHBOARD_AUTH_DATABASE`
+- collection: `JSONVAULT_DASHBOARD_AUTH_COLLECTION`
+
+Default template values currently point to:
+
+```env
+JSONVAULT_DASHBOARD_AUTH_DATABASE=jsonvault_dashboard
+JSONVAULT_DASHBOARD_AUTH_COLLECTION=dashboard_users
+```
+
+Suggested dashboard-owned collections:
+
+- `dashboard_users`: human dashboard accounts.
+- `dashboard_projects`: dashboard project records, each pointing to a Core
+  database name.
+- `dashboard_api_keys`: non-secret generated key metadata, including token
+  prefix, token ID, scope, database, collection, capabilities, and expiration.
+- `dashboard_sessions` or signed HTTP-only cookies: dashboard session state.
+
+Project records should not replace Core databases. A project record is dashboard
+metadata. The user's actual JSON documents live in the Core database named by
+that project record.
+
+Core lazily creates databases and collections on first write when the token
+allows the target path. If explicit database/collection creation is needed for a
+flow, the UI server must call the matching Core management endpoint and respect
+the current token capabilities.
+
+## Environment Contract
+
+### `jsonvault-core`
+
+Core operator env:
+
+- `JSONVAULT_ADMIN_KEY`: root server admin key. Server-side only.
+- `JSONVAULT_JWT_SECRET`: HMAC secret used by Core to validate generated scoped
+  JWT API keys. Must be long and random.
+- storage, encryption, profile, timeout, backup, and resource-limit settings
+  remain Core/operator concerns.
+
+Core does not currently load `JSONVAULT_API_KEY` in its runtime config.
+
+### `jsonvault-ui`
+
+UI operator env:
+
+- `JSONVAULT_API_BASE_URL`: base URL for the Core API, for example
+  `http://localhost:5766`.
+- `JSONVAULT_API_KEY`: operator-provided Core Bearer token used by the UI server
+  for dashboard metadata records such as users and project records.
+- `JSONVAULT_JWT_SECRET`: same value as Core. The UI server uses it to sign
+  short-lived, server-only project manager JWTs for selected project database
+  operations. It should not be used for browser-visible state.
+- `JSONVAULT_DASHBOARD_SESSION_SECRET`: preferred UI-only secret for signing
+  dashboard HTTP-only session cookies. Use a long random value separate from
+  Core's JWT secret in production.
+- `JSONVAULT_DASHBOARD_AUTH_DATABASE`: Core database for dashboard auth records.
+- `JSONVAULT_DASHBOARD_AUTH_COLLECTION`: Core collection for dashboard auth
+  records.
+- `JSONVAULT_DASHBOARD_PROJECTS_DATABASE` and
+  `JSONVAULT_DASHBOARD_PROJECTS_COLLECTION`: Core storage for dashboard project
+  metadata records.
+- `JSONVAULT_DASHBOARD_API_KEYS_DATABASE` and
+  `JSONVAULT_DASHBOARD_API_KEYS_COLLECTION`: Core storage for dashboard-owned
+  generated API key metadata. This stores redacted metadata only, never the
+  full generated token.
+
+None of these values should be exposed through `NEXT_PUBLIC_*`.
+
+## Current State
+
+Evidence from the current worktree:
+
+- `jsonvault-ui/.env.example` declares `JSONVAULT_API_BASE_URL`,
+  `JSONVAULT_JWT_SECRET`, `JSONVAULT_API_KEY`, and dashboard auth storage names.
+- `jsonvault-ui/src/app/layout.tsx` still wraps the app in
+  `DashboardMockProvider`.
+- Several dashboard subpages still call `useDashboardMock()`. The foundation,
+  login/register/logout, projects page, dashboard shell, and dashboard overview
+  now consume real server-side Core/session/project state.
+- `jsonvault-ui/src/lib/constants.ts` has `DASHBOARD_PREVIEW_MODE = true`.
+- Core requires `JSONVAULT_ADMIN_KEY` and `JSONVAULT_JWT_SECRET`.
+- Core accepts all runtime/API requests through `Authorization: Bearer <token>`
+  except `/healthz`.
+- Core `POST /api/v1/admin/keys` can mint `read_only`, `read_write`, and
+  constrained `project_admin` keys.
+- A token with `keys:manage` but without admin scope can mint only
+  `read_only` and `read_write` runtime keys within its own constraints.
+
+## Key Security Rules
+
+- Keep `JSONVAULT_API_KEY`, `JSONVAULT_ADMIN_KEY`, and `JSONVAULT_JWT_SECRET`
+  server-only.
+- Browser-visible code must never import or read these env values.
+- The UI should call Core from server routes, server actions, or server-only
+  modules.
+- Do not store Core secrets in `localStorage`.
+- Do not put `project_admin` tokens in normal runtime app clients.
+- Generated runtime keys should be shown once, then redacted.
+- The UI must call `GET /api/v1/me` with the active server-side Core token and
+  drive navigation/actions from scope and capabilities.
+
+## Recommended Dashboard Key Permission
+
+For the first Core-backed dashboard implementation, `JSONVAULT_API_KEY` should
+be a generated, server-only `project_admin` JWT constrained to the dashboard's
+own Core database:
+
+```json
+{
+  "scope": "project_admin",
+  "database": "jsonvault_dashboard",
+  "collection": "*",
+  "capabilities": [
+    "metadata:read",
+    "documents:read",
+    "documents:write",
+    "collections:manage"
+  ]
+}
+```
+
+Add `keys:manage` only when the dashboard server must mint `read_only` or
+`read_write` runtime keys inside the same database constraint. Do not use
+`read_write` for the dashboard backend because it cannot manage collections or
+keys. Do not use the root `admin` key as the default dashboard credential
+because it can control every database, backups, and key revocation; reserve it
+for operator setup or an explicitly trusted full-admin server mode.
+
+This makes `project_admin` the least-privilege default for the trusted dashboard
+backend. It does not create one universal all-project credential: Core currently
+rejects wildcard `project_admin` keys, so multi-project management needs
+per-project `project_admin` credentials or a separate root-admin-backed operator
+mode.
+
+## Bootstrap API Key Flow
+
+The operator can generate a dashboard bootstrap key with the Core admin key:
+
+```bash
+curl -X POST "$JSONVAULT_API_BASE_URL/api/v1/admin/keys" \
+  -H "Authorization: Bearer $JSONVAULT_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "project_admin",
+    "database": "jsonvault_dashboard",
+    "collection": "*",
+    "capabilities": [
+      "metadata:read",
+      "documents:read",
+      "documents:write",
+      "collections:manage"
+    ]
+  }'
+```
+
+The returned `token` becomes:
+
+```env
+JSONVAULT_API_KEY=<returned-token>
+```
+
+Compatibility gate: the running Core server must include the Audit 004
+`project_admin` scope implementation. If Core returns
+`{"error":"invalid scope, must be read_write or read_only"}`, the running server
+is an older/stale executable. Rebuild and restart `jsonvault-core` before
+continuing dashboard setup.
+
+From `jsonvault-core`, build the package directory, not the single `main.go`
+file:
+
+```powershell
+go build -o main.exe ./cmd/jsonvault
+```
+
+Do not use `go build .\cmd\jsonvault\main.go`; that compiles only `main.go` and
+excludes sibling files such as `restore.go`, which defines `runRestore`.
+
+If this UI deployment must issue app runtime keys for `jsonvault_dashboard`,
+include `keys:manage` on this token. If it must issue runtime keys for user
+project databases, use a `project_admin` token with `keys:manage` for that
+specific project database instead of relying on the dashboard metadata token.
+
+Important constraint: Core currently requires `project_admin` keys to be
+constrained to one database. If the dashboard must manage many project
+databases from one UI instance, we need one of these models:
+
+- operator uses a root-admin-backed UI server for multi-project management;
+- operator provisions one `project_admin` key per managed project/database;
+- Core later adds a safer dashboard/operator token model for multi-database
+  management.
+
+This decision should be made before implementing multi-project real API wiring.
+
+## Project API Key Generation Model
+
+The dashboard metadata `JSONVAULT_API_KEY` should not be used to manage user
+project databases or create user project runtime keys. It is only for
+dashboard-owned metadata records.
+
+Each dashboard project maps to one Core database. If the user opens that
+project's API Keys page, generated app keys must be constrained to that
+project's Core database only.
+
+Example:
+
+- User `user1` opens project `todo_list`. Any generated app key is constrained
+  to `database: "todo_list"` and cannot control `dashboard`.
+- User `user1` opens project `dashboard`. Any generated app key is constrained
+  to `database: "dashboard"` and cannot control `todo_list`.
+
+To support this, the UI server mints a short-lived, server-only project manager
+JWT for the selected project database using `JSONVAULT_JWT_SECRET`:
+
+```json
+{
+  "scope": "project_admin",
+  "database": "todo_list",
+  "collection": "*",
+  "capabilities": [
+    "metadata:read",
+    "documents:read",
+    "documents:write",
+    "collections:manage",
+    "keys:manage"
+  ]
+}
+```
+
+The project manager token must never be sent to browser code. The UI server
+must verify the authenticated dashboard user can administer the selected
+project, force every Core request database to that project database, and allow
+only `read_only` or `read_write` runtime key creation for external app clients.
+Core also enforces this: non-admin tokens with `keys:manage` can mint only
+`read_only` or `read_write` keys inside their own database/collection
+constraints.
+
+Project creation does not require the user to supply an API key. Creating a
+project stores dashboard metadata and establishes the Core database name. The UI
+server can then mint short-lived project manager tokens for that database for
+dashboard-internal management workflows.
+
+## Architecture Target
+
+### Server-only Core client
+
+Create a focused Core client layer, for example:
+
+- `src/lib/core/config.ts`
+- `src/lib/core/client.ts`
+- `src/lib/core/errors.ts`
+- `src/lib/core/types.ts`
+
+Responsibilities:
+
+- validate server env at startup/request boundary;
+- normalize `JSONVAULT_API_BASE_URL`;
+- attach the correct server-only Bearer token: `JSONVAULT_API_KEY` for
+  dashboard metadata records, or a short-lived project manager JWT for selected
+  project database operations;
+- send `Content-Type: application/json` for writes;
+- preserve ETag headers;
+- parse pagination headers;
+- parse Core error bodies consistently;
+- expose typed methods for Core endpoints.
+
+Do not spread raw `fetch()` calls across pages.
+
+### UI server boundary
+
+Browser components should call UI-owned route handlers or server actions. Those
+server boundaries call Core using the server-only Core client.
+
+This keeps the operator-provided `JSONVAULT_API_KEY`, project manager JWTs, and
+`JSONVAULT_JWT_SECRET` out of the browser while still letting dashboard users
+manage selected projects through the UI server.
+
+### Dashboard auth storage
+
+Dashboard login/register should eventually use Core documents in the configured
+auth database and collection.
+
+Suggested document model:
+
+```json
+{
+  "email": "user@example.com",
+  "password_hash": "...",
+  "created_at": "2026-06-09T00:00:00Z",
+  "updated_at": "2026-06-09T00:00:00Z",
+  "role": "operator"
+}
+```
+
+Rules:
+
+- password hashing happens only on the UI server;
+- raw passwords are never stored;
+- dashboard session cookies are HTTP-only;
+- dashboard sessions are separate from Core API keys unless deliberately
+  designed otherwise;
+- if `JSONVAULT_JWT_SECRET` is used by the UI, keep claims clear and avoid
+  accidentally sending dashboard-session JWTs to Core as API keys.
+
+### Capability-driven dashboard
+
+After the UI server authenticates to Core, it should call:
+
+```http
+GET /api/v1/me
+Authorization: Bearer <JSONVAULT_API_KEY>
+```
+
+This endpoint does not log a user in and does not create data. It inspects the
+Bearer token already being used. Core returns the token's scope, database
+constraint, collection constraint, token ID, and capabilities.
+
+`/api/v1/me` is a `jsonvault-core` endpoint, registered by Core's HTTP API and
+implemented by Core's identity handler. The UI should call it; the UI should not
+reimplement its authorization logic.
+
+The response controls:
+
+- visible sidebar sections;
+- enabled create/edit/delete actions;
+- API Keys page scope options;
+- management pages such as Indexes, Search, Schemas, Webhooks, Operations.
+
+Example response:
+
+```json
+{
+  "scope": "project_admin",
+  "database": "jsonvault_dashboard",
+  "collection": "*",
+  "token_id": "1f6d2d2b8c9a4e0d9f1b2c3a4d5e6f70",
+  "capabilities": [
+    "metadata:read",
+    "documents:read",
+    "documents:write",
+    "collections:manage"
+  ]
+}
+```
 
 ## Implementation Plan
 
-### Phase 0: Shared Mock Foundation
+### Execution Mode: Vertical Slices
 
-- [ ] Create a shared mock data module, likely `src/lib/mock-dashboard-store.ts`.
-- [ ] Model data by database and collection:
-  - databases/projects;
-  - collections;
-  - documents;
-  - indexes;
-  - FTS fields;
-  - schemas;
-  - webhooks;
-  - deliveries;
-  - operations;
-  - API keys;
-  - realtime events.
-- [ ] Add mock helpers for core-like behavior:
-  - generate document IDs;
-  - generate ETag-like versions;
-  - create/update/delete documents;
-  - create/delete collections with cascading mock cleanup;
-  - create index and optional background operation;
-  - save non-empty FTS fields and optional rebuild operation;
-  - save/delete per-collection schema;
-  - save/remove webhooks and return a one-time secret;
-  - retry failed webhook deliveries;
-  - generate runtime API keys and handle admin-only key revocation separately;
-  - start/cancel operations;
-  - append realtime events.
-- [ ] Persist mock state to `localStorage` under one namespaced key such as `jsonvault-ui:mock-state`.
-- [ ] Add a reset mock data action for development/testing.
-- [ ] Keep all mock data clearly client-local without telling users data was saved to the real server.
+Implement this plan one page/workflow at a time. Do not wire every dashboard
+area in one broad pass.
 
-### Phase 1: App Shell And Context
+Each slice should include:
 
-- [ ] Update `src/app/dashboard/layout.tsx` so database and collection context can be shared across dashboard pages.
-- [ ] Make Topbar selectors actually change selected database and collection in mock state.
-- [ ] Show collection selector on collection-scoped pages:
-  - Documents;
-  - Indexes;
-  - Full-Text Search;
-  - Schemas;
-  - Webhooks;
-  - Realtime.
-- [ ] Keep Sidebar visibility capability-aware, but make labels user-facing:
-  - Documents;
-  - Collections;
-  - Indexes;
-  - Search;
-  - Schemas;
-  - Webhooks;
-  - Operations;
-  - API Keys;
-  - Realtime;
-  - Admin.
-- [ ] Replace hard-coded dashboard values with selected mock project context.
+- the server-only Core client methods needed by that slice;
+- the UI server route handlers or server actions needed by that slice;
+- page wiring to real data;
+- loading, empty, error, and permission-denied states for that slice;
+- targeted tests or checks for changed modules;
+- a manual test against local `jsonvault-core` when the slice touches real Core
+  behavior;
+- user feedback before moving to the next slice.
 
-### Phase 2: User-Facing Copy Cleanup
+Shared foundation work is allowed only when it unblocks the next page slice. The
+foundation should stay thin and grow as each page needs real Core behavior.
 
-- [ ] Remove loud technical alerts from primary workflows.
-- [ ] Replace the document edit alert with user-facing copy such as:
-  - "This document has change protection. If someone else edits it first, JSONVault will ask you to refresh before saving."
-- [ ] Move raw ETag display to document details under a quieter label such as "Version token" or "Advanced details".
-- [ ] Avoid showing raw capability names in primary descriptions when possible; keep them in tooltips/details.
-- [ ] Remove "not connected yet" messages from mock-mode workflows.
-- [ ] Use "Saved locally for preview" or "Mock preview updated" only where the user needs clarity.
-- [ ] Keep exact API names available in secondary integration details.
+### Page Slice Order
 
-### Phase 3: Auth And Connection Screens
+- [x] **Foundation gate**: env validation, server-only Core client shell,
+      `GET /api/v1/me`, and dashboard session primitives.
+- [x] **Login page**: authenticate dashboard users from Core-backed dashboard
+      auth storage and create an HTTP-only dashboard session.
+- [x] **Register page**: create dashboard users in Core-backed dashboard auth
+      storage with server-side password hashing.
+- [x] **Logout/session guard**: protect dashboard routes and clear sessions.
+- [x] **Projects page**: create/list/select/delete project records and prepare
+      the mapped Core database path.
+- [x] **Dashboard overview**: replace mock overview data with selected-project
+      Core state and JSONVault-only capability labels.
+- [x] **Collections page**: list/create/delete collections for the selected
+      project database.
+- [x] **Documents page**: list/read/create/edit/delete documents for the
+      selected collection.
+- [x] **API Keys page**: generate project-scoped `read_only` and `read_write`
+      app keys using the selected project's server-only manager credential.
+- [ ] **Schemas page**: manage schemas for the selected collection.
+- [ ] **Indexes page**: manage indexes for the selected collection.
+- [ ] **Search page**: manage FTS fields and test search for the selected
+      collection.
+- [ ] **Webhooks page**: manage collection webhook targets and delivery states.
+- [ ] **Operations page**: list/cancel permitted Core operations.
+- [ ] **Realtime page**: connect to real SSE/presence/publish behavior through a
+      safe auth boundary.
+- [ ] **Docs and cleanup**: env examples, setup docs, mock-mode cleanup, and
+      final full-flow verification.
 
-- [ ] Login should validate fields and then enter mock dashboard mode instead of ending in an error.
-- [ ] Register should validate fields and then continue to project setup or dashboard mock mode.
-- [ ] Connect Server should keep the real `/healthz` test, but save mock connection context after success.
-- [ ] Root admin key input should remain operator-only, masked, and never displayed after save.
-- [ ] Add user-facing success states for sign-in, registration, and connection.
+The detailed checklists below remain the responsibility map, but execution
+follows the page slice order above.
 
-### Phase 4: Overview
+### Phase 0: Confirm Token Model
 
-- [ ] Drive stats from shared mock state.
-- [ ] Keep numbers realistic and consistent with page data.
-- [ ] Recent operations should read from the mock operations list.
-- [ ] Quick actions should use labels that match dashboard pages.
-- [ ] Current access should be available, but not dominate the page with technical capability badges.
-- [ ] Add helpful empty state for a new project with no collections/documents.
+- [x] Approve the default `JSONVAULT_API_KEY` model: server-only
+      `project_admin` constrained to the dashboard metadata database.
+- [x] Decide whether multi-project management uses one `project_admin` token per
+      project database or a separate root-admin-backed operator mode.
+- [x] Decide exactly when UI needs `JSONVAULT_JWT_SECRET`; dashboard sessions
+      should use `JSONVAULT_DASHBOARD_SESSION_SECRET`, while offline Core JWT
+      signing still needs Core's JWT secret.
+- [x] Decide whether real multi-project management is in the first real API
+      pass or a later operator/admin pass.
+- [x] Update `jsonvault-ui/.env.example` comments after the decisions are
+      approved.
 
-### Phase 5: Documents Page
+### Phase 1: Core Client Foundation
 
-- [ ] Use documents from the selected database and collection.
-- [ ] Make "Create document" open a JSON editor and add a mock document.
-- [ ] Make edit save update the mock document, generate a new ETag, and close the modal.
-- [ ] Make delete remove the mock document.
-- [ ] Make refresh reload current mock state.
-- [ ] Keep search, pagination, and row selection stable.
-- [ ] Add optional filter/sort controls only if they can work in mock mode.
-- [ ] Replace `JSON Body` with a friendlier label such as `Document JSON`.
-- [ ] Move ETag to advanced details and use user-facing change-protection text.
-- [ ] Keep copy buttons for document ID and version token.
+- [x] Add server-only env validation for `JSONVAULT_API_BASE_URL` and
+      `JSONVAULT_API_KEY`.
+- [x] Add a server-only Core HTTP client.
+- [x] Add typed Core error parsing.
+- [x] Add typed helper for `GET /api/v1/me`.
+- [x] Add typed helper for filtered document list reads.
+- [x] Add typed helper for document creation.
+- [ ] Add typed helpers for:
+      databases,
+      collections,
+      document updates/deletes,
+      indexes,
+      FTS,
+      schemas,
+      webhooks,
+      operations,
+      admin keys where permitted.
+- [ ] Add tests for URL joining, auth headers, JSON serialization, ETag
+      extraction, pagination headers, and Core error parsing.
 
-### Phase 6: Collections Page
+### Phase 2: Dashboard Server API Boundary
 
-- [ ] Use collections from the selected database.
-- [ ] Make "New collection" add a mock collection.
-- [ ] Validate collection names using core-compatible rules.
-- [ ] Make delete cascade related mock docs, indexes, schema, FTS config, webhooks, deliveries, and operations.
-- [ ] Add links/actions from each collection row:
-  - view documents;
-  - manage schema;
-  - manage indexes;
-  - manage search;
-  - manage webhooks.
-- [ ] Use typed confirmation for destructive collection delete.
+- [ ] Add UI route handlers/server actions that call the Core client.
+- [ ] Keep all Core secrets inside server-only modules.
+- [ ] Return sanitized data to browser components.
+- [ ] Map Core `401`, `403`, `404`, `409`, `412`, `422`, and `429` into
+      dashboard-safe error messages.
+- [ ] Add cache/no-store behavior where data must be fresh.
 
-### Phase 7: Indexes Page
+### Phase 3: Dashboard Auth On Core
 
-- [ ] Scope the page to selected collection.
-- [ ] Make create index add an index to that collection.
-- [ ] If "Build in the background" is selected, create a mock running operation and set index state to building.
-- [ ] Provide a small control to complete/fail background mock operations for testing, or auto-complete after a short delay.
-- [ ] Make delete index remove it from mock state.
-- [ ] Keep guidance simple: "Indexes make repeated filters faster."
-- [ ] Show operation link only when an operation exists.
+- [x] Add signed HTTP-only dashboard session cookie primitives.
+- [x] Implement register against the configured Core auth database/collection.
+- [x] Implement login against that same Core collection.
+- [x] Hash passwords server-side.
+- [x] Store dashboard session in an HTTP-only cookie.
+- [x] Add logout.
+- [ ] Keep login/register free of root admin key, JWT secret, and server setup
+      prompts.
 
-### Phase 8: Search / FTS Page
+### Phase 4: Projects On Core
 
-- [ ] Scope FTS fields to selected collection.
-- [ ] Add/remove fields locally before save.
-- [ ] Save configuration into mock state with core-compatible `POST /fts` behavior and create a mock `fts.configure` operation.
-- [ ] Prevent saving an empty field list because the current core handler rejects it.
-- [ ] If all fields are removed, show a user-facing message that at least one searchable field is required to save search configuration.
-- [ ] Make "Test Search" return mock document matches from configured fields.
-- [ ] Show a clear empty state when no fields are configured.
-- [ ] Avoid implying search works across fields that are not configured.
+- [x] Store dashboard project records in the dashboard-owned Core database,
+      likely `dashboard_projects`.
+- [x] Each project record should include a display name, Core database name,
+      owner/user link, created timestamp, and status.
+- [x] Use a server-only project manager credential for selected project
+      operations, minted on demand from `JSONVAULT_JWT_SECRET`.
+- [x] Creating a project should create the dashboard project record and prepare
+      the matching Core database path.
+- [x] Project creation must not require users to provide an API key; dashboard
+      project management uses the UI server's on-demand project manager token.
+- [x] Prefer Core lazy creation where it is enough; use explicit Core
+      database/collection endpoints only when the token has the required
+      capability and the workflow needs explicit provisioning.
+- [ ] Selecting a project should set the active Core database for the existing
+      dashboard pages.
+- [x] Keep the existing Projects page UI; only replace mock data/actions with
+      real server-backed data/actions.
 
-### Phase 9: Schemas Page
+### Phase 5: Replace Mock Store Incrementally
 
-- [ ] Add selected collection context at the top of the page.
-- [ ] Show and edit the schema for only that collection.
-- [ ] Let users switch collections and see different schemas.
-- [ ] Only allow saving a schema for an existing collection.
-- [ ] If the user wants a schema for a missing collection, guide them to create the collection first.
-- [ ] Match core response behavior: no schema means `schema: null`.
-- [ ] Add a Validate schema action that matches `POST /schema/validate` and checks schema format.
-- [ ] Save schema into mock state.
-- [ ] Delete schema only for the selected collection.
-- [ ] Validate JSON syntax immediately.
-- [ ] Recommended: add `ajv` for accurate Draft-07 schema validation in mock mode.
-- [ ] If not adding `ajv`, perform basic schema-shape validation and clearly label it as syntax/basic validation.
-- [ ] Add a test document panel only as a dashboard mock/client helper. Core does not currently expose a document dry-run validation endpoint.
-- [ ] Make mock create/edit document flows enforce the saved schema so the user can see realistic validation failures.
-- [ ] Use user-facing copy:
-  - "This schema checks new and edited documents in this collection."
-  - "Existing documents are not changed."
-- [ ] Keep technical API details in a collapsed or secondary area.
+- [ ] Keep the mock store only behind an explicit preview/development mode.
+- [ ] Build a real data adapter with a similar shape to the current dashboard
+      store so pages can migrate incrementally.
+- [ ] Start with low-risk reads:
+      `GET /api/v1/me`,
+      `GET /api/v1/databases`,
+      `GET /api/v1/{database}/collections`.
+- [ ] Then wire document list/read/create/edit/delete.
+- [ ] Then wire collection create/delete.
+- [ ] Then wire Indexes, Search, Schemas, Webhooks, Operations, Realtime, and
+      API Keys.
 
-### Phase 10: Webhooks Page
+### Phase 6: API Keys Page
 
-- [ ] Scope webhook targets to selected collection.
-- [ ] Make Add target validate public HTTPS-looking URLs in mock mode.
-- [ ] Support core event choices: insert, update, delete, publish, and optionally all events.
-- [ ] Save target into mock state.
-- [ ] Show a one-time mock webhook secret after save with copy action.
-- [ ] Remove target from mock state.
-- [ ] Show deliveries from the selected database and optionally filter/display the embedded event collection.
-- [ ] Do not imply the delivery endpoint itself is collection-scoped; core delivery inspection is database-level.
-- [ ] Make Retry update failed delivery status through pending to delivered or failed.
-- [ ] Keep SSRF warning user-facing:
-  - "Use a public HTTPS endpoint. Local and private network addresses are blocked."
-- [ ] Fix unused imports and accessibility labels while editing.
-
-### Phase 11: Operations Page
-
-- [ ] Read operations from shared mock state.
-- [ ] Show operation details in a drawer or modal.
-- [ ] Make Cancel update running operations to canceling/canceled.
-- [ ] Show last error text in details, not only a vague "Error" label.
-- [ ] Add filters for state/type if simple enough.
-- [ ] Explain operation history is temporary only in secondary helper text.
-
-### Phase 12: API Keys Page
-
-- [ ] Make Generate key create a mock key record.
-- [ ] Show a generated mock token once in a modal with copy action.
-- [ ] Keep read-only and read/write app keys user-facing.
-- [ ] Do not let project users mint project owner keys from this page because core blocks non-admin `project_admin` key creation.
-- [ ] If the current context is root admin, route project owner key creation to Admin/operator UI.
-- [ ] Revoke should be disabled or routed to Admin/operator mode because core revocation is admin-only.
-- [ ] Add expiry selection if it can be mocked cleanly.
-- [ ] Keep raw capability list in advanced details.
+- [x] Use Core `POST /api/v1/admin/keys` through the UI server boundary.
+- [x] For project API key creation, use the selected project's server-only
+      project manager credential, not the dashboard metadata `JSONVAULT_API_KEY`.
+- [x] Force generated key requests to the active project's Core database.
+- [x] If caller has `keys:manage` but not admin, allow only `read_only` and
+      `read_write` keys within caller constraints.
+- [x] Disable key generation when the UI server cannot mint a selected-project
+      manager token with `keys:manage`.
+- [x] Hide or disable `project_admin` creation unless the UI server is in an
+      approved root-admin/operator context.
+- [x] Show generated token once with copy action.
+- [x] Store/display token ID, scope, database, collection, capabilities, and
+      expiration without keeping the full token visible.
 - [ ] Do not show `JSONVAULT_JWT_SECRET`.
 
-### Phase 13: Realtime Page
+### Phase 7: Realtime
 
-- [ ] Scope realtime to selected collection.
-- [ ] Rename internal functions from `mockConnect`/`mockPublish` to user-neutral names.
-- [ ] Start listening should open a simulated stream state and append a connected event.
-- [ ] Stop listening should close the simulated stream state.
-- [ ] Publish should validate JSON and append a transient event only when listening.
-- [ ] Document create/edit/delete actions elsewhere should append realtime events when listening.
-- [ ] Presence should reflect simulated listeners.
-- [ ] Make copy clear:
-  - "Live updates show what your app would receive."
-  - "Temporary events are not saved for replay."
-- [ ] Keep browser auth note out of primary UI unless an integration details panel exists.
+- [ ] Use a fetch-based SSE client or UI server proxy because native
+      `EventSource` cannot set `Authorization` headers.
+- [ ] Never put Bearer tokens in query strings.
+- [ ] Support `Last-Event-ID` or `last_event_id` replay.
+- [ ] Show real connection state only when an actual stream is open.
 
-### Phase 14: Admin Page
+### Phase 8: Docs And Operator UX
 
-- [ ] Keep Admin visible only for root admin mode.
-- [ ] Drive project/database list from shared mock state.
-- [ ] Make New project create a mock database/project.
-- [ ] Add delete project with typed confirmation if included.
-- [ ] Make Create owner key show a copy-once mock project owner token.
-- [ ] Keep health/metrics copy realistic:
-  - health can be mocked;
-  - metrics are admin-only;
-  - backup is admin-only if added.
-- [ ] Avoid hard-coded fake uptime/version unless presented as mock status.
+- [x] Update `jsonvault-ui/.env.example` with comments explaining each env var.
+- [ ] Add a UI setup doc with the operator curl flow.
+- [ ] Document which capabilities are required for each dashboard section.
+- [ ] Document the limitation around one-database `project_admin` tokens.
+- [ ] Keep `docs/integration-guide.md` focused on app developers, not server
+      env setup.
 
-### Phase 15: Shared Components And Accessibility
+### Phase 9: Verification
 
-- [ ] Tighten `Modal` semantics with `role="dialog"`, `aria-modal`, and labelled title.
-- [ ] Replace static clickable wrapper elements in dropdown/modal internals with accessible controls where possible.
-- [ ] Give all textareas and inputs labels or `aria-label`.
-- [ ] Ensure icon-only buttons have `aria-label` and `title` or tooltip.
-- [ ] Remove manual inline SVG close icon where lucide `X` can be used.
-- [ ] Replace `any` button props with typed component props.
-- [ ] Ensure keyboard focus states are visible.
-- [ ] Ensure text does not overflow in buttons, badges, and tables.
-
-### Phase 16: Verification
-
-- [ ] Run `npm run lint`.
+- [ ] For every page slice, run the smallest relevant automated checks before
+      moving on.
+- [ ] For every page slice that calls Core, manually test against a local
+      `jsonvault-core` instance.
+- [ ] Collect user feedback after each completed slice before implementing the
+      next slice.
+- [ ] Run relevant unit tests for the Core client.
 - [ ] Run `npm run build`.
-- [ ] Manually test top-to-bottom dashboard flows:
-  - login/register/connect mock flow;
-  - overview stats update;
-  - create/edit/delete document;
-  - create/delete collection;
-  - create/delete index;
-  - configure FTS and test search;
-  - save/delete per-collection schema;
-  - add/remove webhook and retry delivery;
-  - cancel operation;
-  - generate app API key;
-  - create project owner key in Admin/operator mode;
-  - start/stop realtime and publish event;
-  - admin create project and owner key.
-- [ ] Check mobile-ish viewport for no text overlap.
-- [ ] Check dark and light themes.
-- [ ] Confirm no visible gradients, decorative blobs, or marketing hero sections were added.
+- [ ] Run targeted Biome checks for touched files.
+- [ ] Test with a local `jsonvault-core` instance.
+- [ ] Verify secrets are absent from client bundles and browser responses.
+- [ ] Verify login/register/dashboard requests use UI server routes, not
+      browser-exposed Core secrets.
+- [ ] Verify permission-denied states from real `GET /api/v1/me` capabilities.
 
-## Proposed Implementation Order After Approval
+## Non-Goals For The First Core-Backed Pass
 
-1. Build the shared mock store and dashboard context.
-2. Fix shell/topbar/sidebar context and copy.
-3. Fix Documents and Collections first because they feed the rest of the dashboard.
-4. Fix collection-scoped management pages: Indexes, Search, Schemas, Webhooks.
-5. Fix Operations, API Keys, Realtime, and Admin.
-6. Run lint/build and a manual UI flow pass.
-7. Collect feedback before moving to real API wiring.
+- Do not build billing, organizations, teams, invitations, or hosted SaaS
+  multi-tenancy.
+- Do not expose Core root admin key to browser code.
+- Do not implement unsupported Core features as fake live controls.
+- Do not remove all mock functionality until real adapters cover the relevant
+  flows.
+- Do not use `NEXT_PUBLIC_JSONVAULT_API_KEY` or any equivalent browser-visible
+  secret.
 
-## Approval Questions
+## Open Alignment Questions
 
-- Should mock state persist in `localStorage`, or reset on every browser refresh?
-- Should I add `ajv` so the schema page can validate Draft-07 schemas and test documents accurately?
-- Should the dashboard show API endpoint details by default, or hide them behind "Integration details" sections?
-- Do you approve keeping project owner key creation in Admin/operator mode only, to match current core behavior?
+- Should production require `JSONVAULT_DASHBOARD_SESSION_SECRET` with no
+  fallback to `JSONVAULT_JWT_SECRET`?
+- Should mock mode stay available as an explicit preview mode after real Core
+  integration starts?

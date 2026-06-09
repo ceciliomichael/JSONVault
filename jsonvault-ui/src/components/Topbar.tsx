@@ -21,6 +21,8 @@ interface TopbarProps {
   collections?: string[];
   selectedDb?: string;
   selectedCollection?: string;
+  userEmail?: string;
+  userName?: string;
   onDbChange?: (db: string) => void;
   onCollectionChange?: (col: string) => void;
 }
@@ -31,6 +33,8 @@ export default function Topbar({
   collections = [],
   selectedDb = "",
   selectedCollection = "",
+  userEmail = "",
+  userName = "",
   onDbChange,
   onCollectionChange,
 }: TopbarProps) {
@@ -234,7 +238,7 @@ export default function Topbar({
         >
           <Lightbulb size={15} />
         </button>
-        <ProfileMenu />
+        <ProfileMenu userEmail={userEmail} userName={userName} />
       </div>
     </header>
   );

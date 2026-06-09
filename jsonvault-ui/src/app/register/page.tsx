@@ -2,35 +2,17 @@
 
 import { Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useActionState, useState } from "react";
 import { AuthShell } from "@/components/AuthShell";
+import { registerAction } from "./actions";
+import { initialRegisterActionState } from "./register-state";
 
 export default function RegisterPage() {
-  const router = useRouter();
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!email || !password) {
-      setError("Email and password are required.");
-      return;
-    }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
-    }
-    setError("");
-    setLoading(true);
-    await new Promise((r) => setTimeout(r, 500));
-    setLoading(false);
-    router.push("/projects");
-  }
+  const [state, formAction, pending] = useActionState(
+    registerAction,
+    initialRegisterActionState,
+  );
 
   return (
     <AuthShell>
@@ -39,10 +21,13 @@ export default function RegisterPage() {
       </h1>
       <p className="mb-8 text-[13px] text-zinc-500">Sign up for your account</p>
 
-      <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
-        {error && (
-          <div className="rounded-md border border-red-500/20 bg-red-500/5 px-3.5 py-2.5 text-[12px] leading-relaxed text-red-500 dark:text-red-400">
-            {error}
+      <form action={formAction} noValidate className="flex flex-col gap-4">
+        {state.status === "error" && (
+          <div
+            className="rounded-md border border-red-500/20 bg-red-500/5 px-3.5 py-2.5 text-[12px] leading-relaxed text-red-500 dark:text-red-400"
+            aria-live="polite"
+          >
+            {state.message}
           </div>
         )}
 
@@ -58,10 +43,10 @@ export default function RegisterPage() {
           </label>
           <input
             id="name"
+            name="name"
             type="text"
             autoComplete="name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+            defaultValue={state.values.name}
             placeholder="Your name"
             className="w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-[13px] text-zinc-900 transition-colors placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:border-white/10 dark:bg-[#1a1a1a] dark:text-zinc-100"
           />
@@ -76,11 +61,12 @@ export default function RegisterPage() {
           </label>
           <input
             id="email"
+            name="email"
             type="email"
             autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            defaultValue={state.values.email}
             placeholder="you@example.com"
+            required
             className="w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-[13px] text-zinc-900 transition-colors placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:border-white/10 dark:bg-[#1a1a1a] dark:text-zinc-100"
           />
         </div>
@@ -95,11 +81,12 @@ export default function RegisterPage() {
           <div className="relative">
             <input
               id="password"
+              name="password"
               type={showPwd ? "text" : "password"}
               autoComplete="new-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
               placeholder="Min. 8 characters"
+              required
+              minLength={8}
               className="w-full rounded-md border border-zinc-200 bg-zinc-50 py-2.5 pl-3 pr-10 text-[13px] text-zinc-900 transition-colors placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:border-white/10 dark:bg-[#1a1a1a] dark:text-zinc-100"
             />
             <button
@@ -115,13 +102,13 @@ export default function RegisterPage() {
 
         <button
           type="submit"
-          disabled={loading}
+          disabled={pending}
           className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-md bg-zinc-900 px-4 py-2.5 text-[13px] font-medium text-white shadow-sm transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
         >
-          {loading && (
+          {pending && (
             <span className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin dark:border-black/30 dark:border-t-black" />
           )}
-          {loading ? "Creating account..." : "Create account"}
+          {pending ? "Creating account..." : "Create account"}
         </button>
       </form>
 

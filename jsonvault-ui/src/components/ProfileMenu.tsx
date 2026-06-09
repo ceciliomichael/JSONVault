@@ -11,16 +11,24 @@ import {
   UserCircle,
 } from "lucide-react";
 import { useTheme } from "next-themes";
+import { logoutAction } from "@/app/logout/actions";
 import { Dropdown, DropdownDivider, DropdownItem } from "./ui";
 
 export default function ProfileMenu({
   align = "right",
   direction = "down",
+  userEmail = "",
+  userName = "",
 }: {
   align?: "left" | "right";
   direction?: "down" | "up";
+  userEmail?: string;
+  userName?: string;
 }) {
   const { theme, setTheme } = useTheme();
+  const email = userEmail.trim();
+  const displayName = userName.trim() || nameFromEmail(email);
+  const displayEmail = email || "No email available";
 
   return (
     <Dropdown
@@ -39,10 +47,10 @@ export default function ProfileMenu({
       <div className="w-[320px]">
         <div className="px-4 py-3">
           <div className="text-[14px] font-medium text-zinc-900 dark:text-zinc-100">
-            Workspace User
+            {displayName}
           </div>
-          <div className="text-[13px] text-zinc-500 mt-1">
-            developer@jsonvault.local
+          <div className="mt-1 truncate text-[13px] text-zinc-500">
+            {displayEmail}
           </div>
         </div>
         <DropdownDivider />
@@ -78,15 +86,21 @@ export default function ProfileMenu({
           </div>
         </DropdownItem>
         <DropdownDivider />
-        <DropdownItem
-          icon={LogOut}
-          onClick={() => {
-            window.location.href = "/login";
-          }}
-        >
-          Log out
-        </DropdownItem>
+        <form action={logoutAction}>
+          <button
+            type="submit"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >
+            <LogOut size={14} />
+            Log out
+          </button>
+        </form>
       </div>
     </Dropdown>
   );
+}
+
+function nameFromEmail(email: string): string {
+  const localPart = email.split("@")[0]?.trim();
+  return localPart || "Workspace User";
 }

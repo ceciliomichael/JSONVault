@@ -2,30 +2,17 @@
 
 import { Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useActionState, useState } from "react";
 import { AuthShell } from "@/components/AuthShell";
+import { loginAction } from "./actions";
+import { initialLoginActionState } from "./login-state";
 
 export default function LoginPage() {
-  const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!email || !password) {
-      setError("Email and password are required.");
-      return;
-    }
-    setError("");
-    setLoading(true);
-    await new Promise((r) => setTimeout(r, 500));
-    setLoading(false);
-    router.push("/projects");
-  }
+  const [state, formAction, pending] = useActionState(
+    loginAction,
+    initialLoginActionState,
+  );
 
   return (
     <AuthShell>
@@ -34,10 +21,13 @@ export default function LoginPage() {
       </h1>
       <p className="mb-8 text-[13px] text-zinc-500">Sign in to your account</p>
 
-      <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
-        {error && (
-          <div className="rounded-md border border-red-500/20 bg-red-500/5 px-3.5 py-2.5 text-[12px] leading-relaxed text-red-500 dark:text-red-400">
-            {error}
+      <form action={formAction} noValidate className="flex flex-col gap-4">
+        {state.status === "error" && (
+          <div
+            className="rounded-md border border-red-500/20 bg-red-500/5 px-3.5 py-2.5 text-[12px] leading-relaxed text-red-500 dark:text-red-400"
+            aria-live="polite"
+          >
+            {state.message}
           </div>
         )}
 
@@ -50,11 +40,12 @@ export default function LoginPage() {
           </label>
           <input
             id="email"
+            name="email"
             type="email"
             autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            defaultValue={state.email}
             placeholder="you@example.com"
+            required
             className="w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-[13px] text-zinc-900 transition-colors placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:border-white/10 dark:bg-[#1a1a1a] dark:text-zinc-100"
           />
         </div>
@@ -77,11 +68,11 @@ export default function LoginPage() {
           <div className="relative">
             <input
               id="password"
+              name="password"
               type={showPwd ? "text" : "password"}
               autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
+              required
               className="w-full rounded-md border border-zinc-200 bg-zinc-50 py-2.5 pl-3 pr-10 text-[13px] text-zinc-900 transition-colors placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:border-white/10 dark:bg-[#1a1a1a] dark:text-zinc-100"
             />
             <button
@@ -97,13 +88,13 @@ export default function LoginPage() {
 
         <button
           type="submit"
-          disabled={loading}
+          disabled={pending}
           className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-md bg-zinc-900 px-4 py-2.5 text-[13px] font-medium text-white shadow-sm transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
         >
-          {loading && (
+          {pending && (
             <span className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin dark:border-black/30 dark:border-t-black" />
           )}
-          {loading ? "Signing in..." : "Sign in"}
+          {pending ? "Signing in..." : "Sign in"}
         </button>
       </form>
 

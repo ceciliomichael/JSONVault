@@ -319,7 +319,7 @@ export default function WebhooksPage() {
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="[&_tr]:border-b [&_tr]:border-zinc-100 dark:[&_tr]:border-white/5">
+                  <tbody className="divide-y divide-zinc-100 dark:divide-white/5">
                     {selectedCollection.webhooks.length === 0 ? (
                       <tr>
                         <td colSpan={3}>
