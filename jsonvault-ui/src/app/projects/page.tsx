@@ -258,7 +258,7 @@ export default function ProjectsPage() {
                       type="button"
                       aria-label={`Open dashboard for ${project.displayName ?? project.name}`}
                       onClick={() => openProject(project.name)}
-                      className="absolute inset-0 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-[#121212]"
+                      className="absolute inset-0 cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-white/20 dark:focus-visible:ring-offset-[#121212]"
                     />
                     <div className="relative z-10 pointer-events-none h-full flex flex-col">
                       <div className="flex items-start justify-between gap-4">
