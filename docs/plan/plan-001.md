@@ -2,7 +2,7 @@
 
 Status: draft for user approval
 Created: 2026-06-07
-Updated: 2026-06-09
+Updated: 2026-06-10
 Target project: `jsonvault-ui`
 Core source of truth: `jsonvault-core`
 Reference docs:
@@ -31,12 +31,12 @@ Core-backed.
 ## Current Implementation Status
 
 - Execution mode: page-by-page vertical slices.
-- Current slice: API keys page redacted metadata inventory complete; awaiting
-  feedback before schemas page.
-- Last completed slice: API keys page runtime key generation stores and
-  displays dashboard-owned non-secret key metadata while the full generated
-  token remains one-time only.
-- Next slice after current: schemas page.
+- Current slice: indexes page Core-backed integration complete; awaiting
+  feedback before search/FTS page.
+- Last completed slice: indexes page lists, creates, and deletes
+  collection-scoped Core secondary indexes through server actions and the
+  selected project's server-only manager credential.
+- Next slice after current: search/FTS page.
 - Last verification: targeted Biome checks, `npx tsc --noEmit`, and
   `npm run build` on 2026-06-09; JSONVault UI dev server verified at
   `http://localhost:3000`; project deletion smoke-checked by rendering a Core
@@ -78,7 +78,17 @@ Core-backed.
   records on `/dashboard/keys`, including stored five-character token prefix,
   token ID, scope, database, collection, no old Core inventory disclaimer, no
   full token in the rendered table, and cleanup of the temporary metadata,
-  project, and collection records.
+  project, and collection records; `/dashboard/schemas` smoke-checked with a
+  signed dashboard session selecting a temporary project, real Core collection,
+  and active Core schema, including selected database render, collection render,
+  saved schema badge, schema field/type render, validate/save actions, no mock
+  store output, and cleanup of the temporary schema, collection, and dashboard
+  project record; `/dashboard/indexes` smoke-checked with a signed dashboard
+  session selecting a temporary project, real Core collection, and active Core
+  secondary index, including selected database render, collection render, index
+  field render, ready state badge, create action, collection search, no mock
+  store output, no empty index state, and cleanup of the temporary index,
+  collection, and dashboard project record.
 
 Update this section after each completed slice so the current phase, completed
 work, next page, and verification status remain visible.
@@ -517,8 +527,8 @@ foundation should stay thin and grow as each page needs real Core behavior.
       selected collection.
 - [x] **API Keys page**: generate project-scoped `read_only` and `read_write`
       app keys using the selected project's server-only manager credential.
-- [ ] **Schemas page**: manage schemas for the selected collection.
-- [ ] **Indexes page**: manage indexes for the selected collection.
+- [x] **Schemas page**: manage schemas for the selected collection.
+- [x] **Indexes page**: manage indexes for the selected collection.
 - [ ] **Search page**: manage FTS fields and test search for the selected
       collection.
 - [ ] **Webhooks page**: manage collection webhook targets and delivery states.
@@ -554,16 +564,9 @@ follows the page slice order above.
 - [x] Add typed helper for `GET /api/v1/me`.
 - [x] Add typed helper for filtered document list reads.
 - [x] Add typed helper for document creation.
-- [ ] Add typed helpers for:
-      databases,
-      collections,
-      document updates/deletes,
-      indexes,
-      FTS,
-      schemas,
-      webhooks,
-      operations,
-      admin keys where permitted.
+- [x] Add typed helpers for collections, document updates/deletes, schemas,
+      indexes, and admin key creation where permitted.
+- [ ] Add typed helpers for databases, FTS, webhooks, and operations.
 - [ ] Add tests for URL joining, auth headers, JSON serialization, ETag
       extraction, pagination headers, and Core error parsing.
 

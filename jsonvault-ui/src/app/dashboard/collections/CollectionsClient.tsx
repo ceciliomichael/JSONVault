@@ -2,7 +2,6 @@
 
 import {
   AlertTriangle,
-  ExternalLink,
   FolderOpen,
   Plus,
   Search,
@@ -17,6 +16,7 @@ import {
   PrimaryButton,
   SecondaryButton,
   SelectionCheckbox,
+  SidePanel,
   ToastNotice,
 } from "@/components/ui";
 import { WorkspacePage } from "@/components/Workspace";
@@ -240,7 +240,7 @@ export default function CollectionsClient({
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-100 dark:divide-white/5">
+            <tbody className="divide-y divide-zinc-100 border-b border-zinc-100 dark:divide-white/5 dark:border-white/5">
               {collections.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-6 py-16">
@@ -260,49 +260,51 @@ export default function CollectionsClient({
                   </td>
                 </tr>
               ) : (
-                visibleCollections.map((collection) => (
-                  <tr
-                    key={collection.name}
-                    className="transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/50"
-                  >
-                    <td className="border-r border-zinc-100 px-4 py-3 text-center dark:border-white/5">
-                      <SelectionCheckbox
-                        checked={selectedNames.includes(collection.name)}
-                        label={`Select ${collection.name}`}
-                        onClick={() => toggleName(collection.name)}
-                      />
-                    </td>
-                    <td className="border-r border-zinc-100 px-4 py-3 dark:border-white/5">
-                      <Link
-                        href={`/dashboard/data?collection=${encodeURIComponent(collection.name)}`}
-                        className="inline-flex items-center gap-2 font-mono text-[13px] font-medium text-zinc-800 hover:underline dark:text-zinc-200"
-                      >
-                        <FolderOpen size={14} className="text-zinc-400" />
-                        {collection.name}
-                      </Link>
-                    </td>
-                    <td className="border-r border-zinc-100 px-4 py-3 text-zinc-600 dark:border-white/5 dark:text-zinc-400">
-                      {formatDocumentCount(collection.documentCount)}
-                    </td>
-                    <td className="border-r border-zinc-100 px-4 py-3 dark:border-white/5">
-                      <code className="font-mono text-[12px] text-zinc-500">
-                        /api/v1/{database}/{collection.name}
-                      </code>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-3">
-                        <Link
-                          href={`/dashboard/data?collection=${encodeURIComponent(collection.name)}`}
-                          className="inline-flex items-center gap-1.5 text-[12px] font-medium text-zinc-600 transition-colors hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white"
-                        >
-                          Open
-                          <ExternalLink size={12} />
-                        </Link>
+                visibleCollections.map((collection) => {
+                  const href = `/dashboard/data?collection=${encodeURIComponent(collection.name)}`;
+                  return (
+                    <tr
+                      key={collection.name}
+                      className="cursor-pointer transition-colors hover:bg-zinc-50 focus-within:bg-zinc-50 dark:hover:bg-zinc-900/50 dark:focus-within:bg-zinc-900/50"
+                      onClick={() => router.push(href)}
+                      onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget) return;
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          router.push(href);
+                        }
+                      }}
+                      role="link"
+                      tabIndex={0}
+                    >
+                      <td className="border-r border-zinc-100 px-4 py-3 text-center dark:border-white/5">
+                        <SelectionCheckbox
+                          checked={selectedNames.includes(collection.name)}
+                          label={`Select ${collection.name}`}
+                          onClick={() => toggleName(collection.name)}
+                        />
+                      </td>
+                      <td className="border-r border-zinc-100 px-4 py-3 dark:border-white/5">
+                        <span className="inline-flex items-center gap-2 font-mono text-[13px] font-medium text-zinc-800 dark:text-zinc-200">
+                          <FolderOpen size={14} className="text-zinc-400" />
+                          {collection.name}
+                        </span>
+                      </td>
+                      <td className="border-r border-zinc-100 px-4 py-3 text-zinc-600 dark:border-white/5 dark:text-zinc-400">
+                        {formatDocumentCount(collection.documentCount)}
+                      </td>
+                      <td className="border-r border-zinc-100 px-4 py-3 dark:border-white/5">
+                        <code className="font-mono text-[12px] text-zinc-500">
+                          /api/v1/{database}/{collection.name}
+                        </code>
+                      </td>
+                      <td className="px-4 py-3 text-right">
                         <button
                           type="button"
                           disabled={!canManageCollections || isPending}
                           aria-label={`Delete collection ${collection.name}`}
-                          onClick={() => {
+                          onClick={(event) => {
+                            event.stopPropagation();
                             setDeleteTargets([collection.name]);
                             setDeleteConfirm("");
                           }}
@@ -310,10 +312,10 @@ export default function CollectionsClient({
                         >
                           <Trash2 size={14} />
                         </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -321,9 +323,10 @@ export default function CollectionsClient({
       </div>
 
       {creating && (
-        <Modal
+        <SidePanel
           title="New collection"
           onClose={() => setCreating(false)}
+          hasUnsavedChanges={!!newName.trim()}
           footer={
             <>
               <SecondaryButton type="button" onClick={() => setCreating(false)}>
@@ -358,7 +361,7 @@ export default function CollectionsClient({
               start with a letter or number.
             </p>
           </div>
-        </Modal>
+        </SidePanel>
       )}
 
       {deleteTargets.length > 0 && (

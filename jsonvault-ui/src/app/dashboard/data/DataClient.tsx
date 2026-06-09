@@ -30,20 +30,20 @@ import {
   ToastNotice,
 } from "@/components/ui";
 import type { ProjectDocument } from "@/lib/documents";
-import { handleTextareaIndent } from "@/lib/textarea-indent";
 import { formatDate } from "@/lib/utils";
 import {
   createDocumentAction,
   deleteDocumentsAction,
   updateDocumentAction,
 } from "./actions";
+import {
+  type DocumentEditorContext,
+  DocumentEditorPanel,
+} from "./DocumentEditorPanel";
+import { EMPTY_DOCUMENT_JSON } from "./document-editor";
 import type { DocumentActionResult } from "./document-state";
 
 const LIMIT_OPTIONS = [10, 25, 50, 100];
-
-type EditorState =
-  | { mode: "create"; json: string }
-  | { mode: "edit"; id: string; etag?: string; json: string };
 
 interface DeleteTarget {
   id: string;
@@ -81,8 +81,7 @@ export default function DataClient({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deleteTargets, setDeleteTargets] = useState<DeleteTarget[]>([]);
   const [deleteConfirm, setDeleteConfirm] = useState("");
-  const [editor, setEditor] = useState<EditorState | null>(null);
-  const [jsonError, setJsonError] = useState("");
+  const [editor, setEditor] = useState<DocumentEditorContext | null>(null);
   const [notice, setNotice] = useState<DocumentActionResult | null>(null);
   const [collectionSearch, setCollectionSearch] = useState("");
 
@@ -168,15 +167,13 @@ export default function DataClient({
   }
 
   function openCreate() {
-    setJsonError("");
     setEditor({
       mode: "create",
-      json: JSON.stringify({ name: "New document" }, null, 2),
+      json: EMPTY_DOCUMENT_JSON,
     });
   }
 
   function openEdit(document: ProjectDocument) {
-    setJsonError("");
     setEditor({
       mode: "edit",
       id: document.id,
@@ -185,28 +182,22 @@ export default function DataClient({
     });
   }
 
-  function saveEditor() {
+  function saveEditor(json: string) {
     if (!editor || !selectedCollection) return;
-    const validationError = validateDocumentJson(editor.json);
-    if (validationError) {
-      setJsonError(validationError);
-      return;
-    }
 
     startTransition(async () => {
       const result =
         editor.mode === "create"
-          ? await createDocumentAction(selectedCollection, editor.json)
+          ? await createDocumentAction(selectedCollection, json)
           : await updateDocumentAction(
               selectedCollection,
               editor.id,
               editor.etag,
-              editor.json,
+              json,
             );
       setNotice(result);
       if (result.status !== "error") {
         setEditor(null);
-        setJsonError("");
         router.refresh();
       }
     });
@@ -443,7 +434,7 @@ export default function DataClient({
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-100 dark:divide-white/5">
+            <tbody className="divide-y divide-zinc-100 border-b border-zinc-100 dark:divide-white/5 dark:border-white/5">
               {!selectedCollection ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-16">
@@ -465,7 +456,17 @@ export default function DataClient({
                 documents.map((document) => (
                   <tr
                     key={document.id}
-                    className="transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/50"
+                    className="cursor-pointer transition-colors hover:bg-zinc-50 focus-within:bg-zinc-50 dark:hover:bg-zinc-900/50 dark:focus-within:bg-zinc-900/50"
+                    onClick={() => openEdit(document)}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        openEdit(document);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
                   >
                     <td className="border-r border-zinc-100 px-4 py-3 text-center dark:border-white/5">
                       <SelectionCheckbox
@@ -475,13 +476,9 @@ export default function DataClient({
                       />
                     </td>
                     <td className="border-r border-zinc-100 px-4 py-3 dark:border-white/5">
-                      <button
-                        type="button"
-                        onClick={() => openEdit(document)}
-                        className="font-mono text-[12px] font-medium text-zinc-800 hover:underline dark:text-zinc-200"
-                      >
+                      <span className="font-mono text-[12px] font-medium text-zinc-800 dark:text-zinc-200">
                         {document.id}
-                      </button>
+                      </span>
                     </td>
                     <td className="max-w-[420px] border-r border-zinc-100 px-4 py-3 dark:border-white/5">
                       <span className="block truncate font-mono text-[12px] text-zinc-600 dark:text-zinc-300">
@@ -499,30 +496,21 @@ export default function DataClient({
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-3">
-                        <button
-                          type="button"
-                          onClick={() => openEdit(document)}
-                          className="inline-flex items-center gap-1.5 text-[12px] font-medium text-zinc-600 transition-colors hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white"
-                        >
-                          <Code2 size={13} />
-                          Open
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!canWriteDocuments || isPending}
-                          aria-label={`Delete document ${document.id}`}
-                          onClick={() => {
-                            setDeleteTargets([
-                              { id: document.id, etag: document.etag },
-                            ]);
-                            setDeleteConfirm("");
-                          }}
-                          className="inline-flex items-center text-zinc-400 transition-colors hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-45"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        disabled={!canWriteDocuments || isPending}
+                        aria-label={`Delete document ${document.id}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setDeleteTargets([
+                            { id: document.id, etag: document.etag },
+                          ]);
+                          setDeleteConfirm("");
+                        }}
+                        className="inline-flex items-center text-zinc-400 transition-colors hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </td>
                   </tr>
                 ))
@@ -567,57 +555,13 @@ export default function DataClient({
       </main>
 
       {editor && (
-        <Modal
-          title={editor.mode === "create" ? "Create document" : "Edit document"}
+        <DocumentEditorPanel
+          editor={editor}
+          disabled={!canWriteDocuments}
+          isPending={isPending}
           onClose={() => setEditor(null)}
-          footer={
-            <>
-              <SecondaryButton type="button" onClick={() => setEditor(null)}>
-                Cancel
-              </SecondaryButton>
-              <PrimaryButton
-                disabled={!canWriteDocuments || isPending || !!jsonError}
-                onClick={saveEditor}
-              >
-                {isPending
-                  ? "Saving..."
-                  : editor.mode === "create"
-                    ? "Create document"
-                    : "Save changes"}
-              </PrimaryButton>
-            </>
-          }
-        >
-          <div className="flex min-h-[420px] flex-col">
-            <label
-              htmlFor="document-json"
-              className="mb-2 block text-[12px] font-medium text-zinc-700 dark:text-zinc-300"
-            >
-              Document JSON
-            </label>
-            <textarea
-              id="document-json"
-              value={editor.json}
-              onChange={(event) => {
-                setEditor({ ...editor, json: event.target.value });
-                setJsonError(validateDocumentJson(event.target.value));
-              }}
-              onKeyDown={(event) =>
-                handleTextareaIndent(event, (value) => {
-                  setEditor({ ...editor, json: value });
-                  setJsonError(validateDocumentJson(value));
-                })
-              }
-              className="min-h-0 flex-1 resize-none rounded-md border border-zinc-200 bg-zinc-50 p-4 font-mono text-[13px] text-zinc-800 shadow-inner transition-colors focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:border-white/10 dark:bg-[#121212] dark:text-zinc-200 custom-scrollbar"
-              spellCheck={false}
-            />
-            {jsonError && (
-              <p className="mt-2 font-mono text-[12px] text-red-500">
-                {jsonError}
-              </p>
-            )}
-          </div>
-        </Modal>
+          onSave={saveEditor}
+        />
       )}
 
       {deleteTargets.length > 0 && (
@@ -751,18 +695,6 @@ function EmptyCollectionState({
       )}
     </div>
   );
-}
-
-function validateDocumentJson(value: string): string {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return "Document JSON must be an object.";
-    }
-    return "";
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error);
-  }
 }
 
 function documentPreview(document: Record<string, unknown>): string {

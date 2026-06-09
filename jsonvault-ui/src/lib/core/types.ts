@@ -58,6 +58,83 @@ export interface DeleteCollectionResult {
   deleted: boolean;
 }
 
+export interface GetSchemaParams {
+  database: string;
+  collection: string;
+}
+
+export interface ValidateSchemaParams {
+  database: string;
+  collection: string;
+  schema: Record<string, unknown>;
+}
+
+export interface ValidateSchemaResult {
+  valid: boolean;
+}
+
+export interface SetSchemaParams {
+  database: string;
+  collection: string;
+  schema: Record<string, unknown>;
+}
+
+export interface SetSchemaResult {
+  updated: boolean;
+}
+
+export interface DeleteSchemaParams {
+  database: string;
+  collection: string;
+}
+
+export interface DeleteSchemaResult {
+  deleted: boolean;
+}
+
+export type CoreIndexState = "ready" | "building" | "failed";
+
+export interface CoreIndexInfo {
+  field: string;
+  state: CoreIndexState;
+  operation_id?: string;
+}
+
+export interface ListIndexesParams {
+  database: string;
+  collection: string;
+  details?: boolean;
+}
+
+export interface ListIndexesResult {
+  indexes: string[] | CoreIndexInfo[];
+}
+
+export interface CreateIndexParams {
+  database: string;
+  collection: string;
+  field: string;
+  async?: boolean;
+}
+
+export interface CreateIndexResult {
+  indexed?: boolean;
+  field?: string;
+  state?: CoreIndexState;
+  operation_id?: string;
+}
+
+export interface DeleteIndexParams {
+  database: string;
+  collection: string;
+  field: string;
+}
+
+export interface DeleteIndexResult {
+  deleted: boolean;
+  field: string;
+}
+
 export type RuntimeApiKeyScope = "read_only" | "read_write";
 
 export interface CreateApiKeyParams {

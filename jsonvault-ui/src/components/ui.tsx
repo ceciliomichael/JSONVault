@@ -390,6 +390,7 @@ export function SidePanel({
   children,
   footer,
   size = "md",
+  bodyClassName,
   hasUnsavedChanges = false,
   discardTitle = "Discard unsaved changes?",
   discardDescription = "This panel has draft changes that have not been saved.",
@@ -399,6 +400,7 @@ export function SidePanel({
   children: React.ReactNode;
   footer?: React.ReactNode;
   size?: "md" | "lg" | "xl";
+  bodyClassName?: string;
   hasUnsavedChanges?: boolean;
   discardTitle?: string;
   discardDescription?: React.ReactNode;
@@ -448,7 +450,11 @@ export function SidePanel({
             <X size={18} />
           </button>
         </div>
-        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-6 py-6 pb-20 flex flex-col gap-5">
+        <div
+          className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${
+            bodyClassName ?? "px-6 py-6 pb-20 flex flex-col gap-5"
+          }`}
+        >
           {children}
         </div>
         {footer && (

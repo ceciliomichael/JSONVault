@@ -250,7 +250,7 @@ export default function OperationsPage() {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-100 dark:divide-white/5">
+            <tbody className="divide-y divide-zinc-100 border-b border-zinc-100 dark:divide-white/5 dark:border-white/5">
               {operations.length === 0 ? (
                 <tr>
                   <td
@@ -276,7 +276,17 @@ export default function OperationsPage() {
                   return (
                     <tr
                       key={operation.operation_id}
-                      className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors"
+                      className="cursor-pointer hover:bg-zinc-50 focus-within:bg-zinc-50 dark:hover:bg-zinc-900/50 dark:focus-within:bg-zinc-900/50 transition-colors"
+                      onClick={() => setSelected(operation)}
+                      onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget) return;
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setSelected(operation);
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
                     >
                       <td className="px-4 py-3 text-center border-r border-zinc-100 dark:border-white/5">
                         <SelectionCheckbox
@@ -290,13 +300,9 @@ export default function OperationsPage() {
                         />
                       </td>
                       <td className="px-4 py-3 border-r border-zinc-100 dark:border-white/5">
-                        <button
-                          type="button"
-                          onClick={() => setSelected(operation)}
-                          className="font-mono text-[13px] text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:underline transition-colors"
-                        >
+                        <span className="font-mono text-[13px] text-zinc-500 dark:text-zinc-400">
                           {operation.operation_id}
-                        </button>
+                        </span>
                       </td>
                       <td className="px-4 py-3 border-r border-zinc-100 dark:border-white/5">
                         <span className="font-mono text-[13px] text-zinc-700 dark:text-zinc-300">

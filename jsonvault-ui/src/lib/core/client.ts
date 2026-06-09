@@ -14,15 +14,28 @@ import type {
   CreateCollectionParams,
   CreateCollectionResult,
   CreateDocumentParams,
+  CreateIndexParams,
+  CreateIndexResult,
   DeleteCollectionParams,
   DeleteCollectionResult,
   DeleteDocumentParams,
+  DeleteIndexParams,
+  DeleteIndexResult,
+  DeleteSchemaParams,
+  DeleteSchemaResult,
   GetDocumentParams,
+  GetSchemaParams,
   ListCollectionsParams,
   ListDocumentsParams,
   ListDocumentsResult,
+  ListIndexesParams,
+  ListIndexesResult,
   MeResponse,
+  SetSchemaParams,
+  SetSchemaResult,
   UpdateDocumentParams,
+  ValidateSchemaParams,
+  ValidateSchemaResult,
 } from "./types";
 
 export class CoreClient {
@@ -93,6 +106,91 @@ export class CoreClient {
         collection: params.collection,
       },
     });
+  }
+
+  async getSchema(params: GetSchemaParams): Promise<unknown> {
+    validateCoreDatabaseName(params.database);
+    validateCoreCollectionName(params.collection);
+
+    return this.request<unknown>(
+      `/api/v1/${encodeURIComponent(params.database)}/${encodeURIComponent(params.collection)}/schema`,
+      { cache: "no-store" },
+    );
+  }
+
+  async validateSchema(
+    params: ValidateSchemaParams,
+  ): Promise<ValidateSchemaResult> {
+    validateCoreDatabaseName(params.database);
+    validateCoreCollectionName(params.collection);
+
+    return this.request<ValidateSchemaResult>(
+      `/api/v1/${encodeURIComponent(params.database)}/${encodeURIComponent(params.collection)}/schema/validate`,
+      {
+        method: "POST",
+        body: params.schema,
+      },
+    );
+  }
+
+  async setSchema(params: SetSchemaParams): Promise<SetSchemaResult> {
+    validateCoreDatabaseName(params.database);
+    validateCoreCollectionName(params.collection);
+
+    return this.request<SetSchemaResult>(
+      `/api/v1/${encodeURIComponent(params.database)}/${encodeURIComponent(params.collection)}/schema`,
+      {
+        method: "PUT",
+        body: params.schema,
+      },
+    );
+  }
+
+  async deleteSchema(params: DeleteSchemaParams): Promise<DeleteSchemaResult> {
+    validateCoreDatabaseName(params.database);
+    validateCoreCollectionName(params.collection);
+
+    return this.request<DeleteSchemaResult>(
+      `/api/v1/${encodeURIComponent(params.database)}/${encodeURIComponent(params.collection)}/schema`,
+      { method: "DELETE" },
+    );
+  }
+
+  async listIndexes(params: ListIndexesParams): Promise<ListIndexesResult> {
+    validateCoreDatabaseName(params.database);
+    validateCoreCollectionName(params.collection);
+
+    const query = params.details ? "?details=true" : "";
+    return this.request<ListIndexesResult>(
+      `/api/v1/${encodeURIComponent(params.database)}/${encodeURIComponent(params.collection)}/indexes${query}`,
+      { cache: "no-store" },
+    );
+  }
+
+  async createIndex(params: CreateIndexParams): Promise<CreateIndexResult> {
+    validateCoreDatabaseName(params.database);
+    validateCoreCollectionName(params.collection);
+    validateCoreFieldName(params.field);
+
+    const query = params.async ? "?async=true" : "";
+    return this.request<CreateIndexResult>(
+      `/api/v1/${encodeURIComponent(params.database)}/${encodeURIComponent(params.collection)}/indexes${query}`,
+      {
+        method: "POST",
+        body: { field: params.field },
+      },
+    );
+  }
+
+  async deleteIndex(params: DeleteIndexParams): Promise<DeleteIndexResult> {
+    validateCoreDatabaseName(params.database);
+    validateCoreCollectionName(params.collection);
+    validateCoreFieldName(params.field);
+
+    return this.request<DeleteIndexResult>(
+      `/api/v1/${encodeURIComponent(params.database)}/${encodeURIComponent(params.collection)}/indexes/${encodeURIComponent(params.field)}`,
+      { method: "DELETE" },
+    );
   }
 
   async createDocument<TDocument extends Record<string, unknown>>(
