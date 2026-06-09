@@ -529,7 +529,7 @@ foundation should stay thin and grow as each page needs real Core behavior.
       app keys using the selected project's server-only manager credential.
 - [x] **Schemas page**: manage schemas for the selected collection.
 - [x] **Indexes page**: manage indexes for the selected collection.
-- [ ] **Search page**: manage FTS fields and test search for the selected
+- [x] **Search page**: manage FTS fields and test search for the selected
       collection.
 - [ ] **Webhooks page**: manage collection webhook targets and delivery states.
 - [ ] **Operations page**: list/cancel permitted Core operations.

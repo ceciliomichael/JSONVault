@@ -171,6 +171,26 @@ export interface UpdateDocumentParams<
   expectedEtag?: string;
 }
 
+export interface GetFTSParams {
+  database: string;
+  collection: string;
+}
+
+export interface GetFTSResult {
+  fields: string[];
+}
+
+export interface SetFTSParams {
+  database: string;
+  collection: string;
+  fields: string[];
+  async?: boolean;
+}
+
+export interface SetFTSResult {
+  operation_id?: string;
+}
+
 export interface ListDocumentsResult<
   TDocument extends Record<string, unknown>,
 > {

@@ -24,6 +24,8 @@ import type {
   DeleteSchemaParams,
   DeleteSchemaResult,
   GetDocumentParams,
+  GetFTSParams,
+  GetFTSResult,
   GetSchemaParams,
   ListCollectionsParams,
   ListDocumentsParams,
@@ -31,6 +33,8 @@ import type {
   ListIndexesParams,
   ListIndexesResult,
   MeResponse,
+  SetFTSParams,
+  SetFTSResult,
   SetSchemaParams,
   SetSchemaResult,
   UpdateDocumentParams,
@@ -291,6 +295,30 @@ export class CoreClient {
       limit: readNumberHeader(response, "X-Limit"),
       offset: readNumberHeader(response, "X-Offset"),
     };
+  }
+
+  async getFTS(params: GetFTSParams): Promise<GetFTSResult> {
+    validateCoreDatabaseName(params.database);
+    validateCoreCollectionName(params.collection);
+
+    return this.request<GetFTSResult>(
+      `/api/v1/${encodeURIComponent(params.database)}/${encodeURIComponent(params.collection)}/fts`,
+      { cache: "no-store" },
+    );
+  }
+
+  async setFTS(params: SetFTSParams): Promise<SetFTSResult> {
+    validateCoreDatabaseName(params.database);
+    validateCoreCollectionName(params.collection);
+
+    const query = params.async ? "?async=true" : "";
+    return this.request<SetFTSResult>(
+      `/api/v1/${encodeURIComponent(params.database)}/${encodeURIComponent(params.collection)}/fts${query}`,
+      {
+        method: "POST",
+        body: { fields: params.fields },
+      },
+    );
   }
 
   async request<T>(path: string, options: CoreRequestOptions = {}): Promise<T> {
