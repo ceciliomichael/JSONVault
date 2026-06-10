@@ -660,20 +660,20 @@ follows the page slice order above.
 
 ### Phase 9: Verification
 
-- [ ] For every page slice, run the smallest relevant automated checks before
+- [x] For every page slice, run the smallest relevant automated checks before
       moving on.
-- [ ] For every page slice that calls Core, manually test against a local
+- [x] For every page slice that calls Core, manually test against a local
       `jsonvault-core` instance.
-- [ ] Collect user feedback after each completed slice before implementing the
+- [x] Collect user feedback after each completed slice before implementing the
       next slice.
-- [ ] Run relevant unit tests for the Core client.
-- [ ] Run `npm run build`.
-- [ ] Run targeted Biome checks for touched files.
-- [ ] Test with a local `jsonvault-core` instance.
-- [ ] Verify secrets are absent from client bundles and browser responses.
-- [ ] Verify login/register/dashboard requests use UI server routes, not
+- [x] Run relevant unit tests for the Core client.
+- [x] Run `npm run build`.
+- [x] Run targeted Biome checks for touched files.
+- [x] Test with a local `jsonvault-core` instance.
+- [x] Verify secrets are absent from client bundles and browser responses.
+- [x] Verify login/register/dashboard requests use UI server routes, not
       browser-exposed Core secrets.
-- [ ] Verify permission-denied states from real `GET /api/v1/me` capabilities.
+- [x] Verify permission-denied states from real `GET /api/v1/me` capabilities.
 
 ## Non-Goals For The First Core-Backed Pass
 

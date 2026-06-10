@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   createCoreClient,
   getDashboardProjectsStorageConfig,
@@ -5,7 +6,6 @@ import {
 } from "@/lib/core";
 import {
   normalizeProjectDatabaseName,
-  projectDatabaseFromName,
   validateProjectDisplayName,
 } from "./names";
 import type {
@@ -76,12 +76,11 @@ export async function createDashboardProject(
 
   let database: string;
   try {
-    database = normalizeProjectDatabaseName(
-      input.database?.trim() || projectDatabaseFromName(displayName),
-    );
+    const randomId = randomBytes(8).toString("hex");
+    database = normalizeProjectDatabaseName(randomId);
   } catch (error) {
     throw new DashboardProjectValidationError(
-      error instanceof Error ? error.message : "Database ID is invalid.",
+      error instanceof Error ? error.message : "Failed to generate database ID.",
     );
   }
   await assertDatabaseIsAvailable(database);

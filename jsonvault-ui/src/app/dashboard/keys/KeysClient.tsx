@@ -179,7 +179,9 @@ export default function KeysClient({
                 ))}
               </tr>
             </thead>
-            <tbody className={`divide-y divide-zinc-100 dark:divide-white/5 ${visibleKeys.length > 0 ? "border-b border-zinc-100 dark:border-white/5" : ""}`}>
+            <tbody
+              className={`divide-y divide-zinc-100 dark:divide-white/5 ${visibleKeys.length > 0 ? "border-b border-zinc-100 dark:border-white/5" : ""}`}
+            >
               {visibleKeys.length > 0 ? (
                 visibleKeys.map((record) => (
                   <tr

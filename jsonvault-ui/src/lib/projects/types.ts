@@ -22,7 +22,6 @@ export interface DashboardProject {
 
 export interface CreateDashboardProjectInput {
   displayName: string;
-  database?: string;
   ownerUserId: string;
   ownerEmail?: string;
 }

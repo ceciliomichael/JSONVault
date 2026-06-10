@@ -19,12 +19,10 @@ export async function createProjectAction(
 ): Promise<ProjectActionState> {
   const session = await requireDashboardSession();
   const displayName = readFormString(formData, "displayName").trim();
-  const database = readFormString(formData, "database").trim().toLowerCase();
 
   try {
     const project = await createDashboardProject({
       displayName,
-      database,
       ownerUserId: session.userId,
       ownerEmail: session.email,
     });
@@ -38,7 +36,7 @@ export async function createProjectAction(
       error instanceof DashboardProjectAlreadyExistsError ||
       error instanceof DashboardProjectsUnavailableError
     ) {
-      return fail(error.message, displayName, database);
+      return fail(error.message, displayName);
     }
     if (
       error instanceof Error &&
@@ -47,7 +45,6 @@ export async function createProjectAction(
       return fail(
         "Project storage is not configured. Check the UI server environment.",
         displayName,
-        database,
       );
     }
 
@@ -55,7 +52,6 @@ export async function createProjectAction(
     return fail(
       "Could not create the project right now. Try again.",
       displayName,
-      database,
     );
   }
 
@@ -104,12 +100,11 @@ export async function deleteProjectAction(formData: FormData): Promise<void> {
 function fail(
   message: string,
   displayName: string,
-  database: string,
 ): ProjectActionState {
   return {
     status: "error",
     message,
-    values: { displayName, database },
+    values: { displayName },
   };
 }
 

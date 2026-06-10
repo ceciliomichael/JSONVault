@@ -13,12 +13,14 @@ export default function DashboardShell({
   project,
   userEmail,
   userName,
+  apiUrl,
 }: {
   children: ReactNode;
   me: MeResponse | null;
   project: DashboardProject;
   userEmail: string;
   userName?: string;
+  apiUrl: string;
 }) {
   const pathname = usePathname();
   const databaseLabels = { [project.database]: project.displayName };
@@ -34,6 +36,7 @@ export default function DashboardShell({
         selectedCollection=""
         userEmail={userEmail}
         userName={userName}
+        apiUrl={apiUrl}
       />
       <div className="flex h-[calc(100vh-3rem)] overflow-hidden">
         <Sidebar me={me} />

@@ -46,7 +46,8 @@ export default async function OverviewPage() {
   const collections = identity
     ? await listCollectionsForProject(client, project.database)
     : [];
-  const apiEndpoint = `${getCoreApiBaseUrl()}/api/v1/${project.database}`;
+  const apiBaseUrl = getCoreApiBaseUrl();
+  const apiEndpoint = `${apiBaseUrl}/api/v1/${project.database}`;
   const projectReady = Boolean(identity);
 
   return (
@@ -61,7 +62,11 @@ export default async function OverviewPage() {
               <code className="min-w-0 truncate rounded-md border border-zinc-200 bg-zinc-50 px-3 py-1.5 font-mono text-[13px] text-zinc-700 dark:border-white/10 dark:bg-[#161616] dark:text-zinc-300">
                 {apiEndpoint}
               </code>
-              <CopyEndpointButton text={apiEndpoint} />
+              <CopyEndpointButton
+                text={apiEndpoint}
+                database={project.database}
+                apiBaseUrl={apiBaseUrl}
+              />
             </div>
           </div>
 

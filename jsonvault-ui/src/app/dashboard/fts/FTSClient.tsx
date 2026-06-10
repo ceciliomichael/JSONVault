@@ -11,7 +11,13 @@ import {
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  type FormEvent,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+} from "react";
 import {
   Badge,
   ConfirmModal,
@@ -74,7 +80,10 @@ export default function FTSClient({
   const [addFieldDiscardConfirm, setAddFieldDiscardConfirm] = useState(false);
   const [addFieldSaveConfirm, setAddFieldSaveConfirm] = useState(false);
   const [query, setQuery] = useState(searchQuery);
-  const [notice, setNotice] = useState<{ status: string; message: string } | null>(null);
+  const [notice, setNotice] = useState<{
+    status: string;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     setFields(initialFields);
@@ -82,7 +91,7 @@ export default function FTSClient({
     setFieldSearch("");
     setQuery(searchQuery);
     setNotice(null);
-  }, [selectedCollection, initialFields, searchQuery]);
+  }, [initialFields, searchQuery]);
 
   const visibleFields = useMemo(() => {
     const term = fieldSearch.trim().toLowerCase();
@@ -293,11 +302,7 @@ export default function FTSClient({
         </>
       }
       action={
-        <Badge
-          variant={
-            initialFields.length > 0 ? "success" : "neutral"
-          }
-        >
+        <Badge variant={initialFields.length > 0 ? "success" : "neutral"}>
           {initialFields.length > 0 ? "Configured" : "Not set"}
         </Badge>
       }
@@ -313,7 +318,7 @@ export default function FTSClient({
       <div className="h-full flex min-h-0 min-w-0 overflow-hidden">
         <CollectionPanel
           title="Search"
-          collections={collections.map(c => ({ name: c }) as any)}
+          collections={collections.map((c) => ({ name: c }))}
           selectedCollection={selectedCollection}
           onSelect={handleCollectionSelect}
           search={collectionSearch}
@@ -322,7 +327,7 @@ export default function FTSClient({
 
         <div className="flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col">
           <CollectionTabs
-            collections={collections.map(c => ({ name: c }) as any)}
+            collections={collections.map((c) => ({ name: c }))}
             selectedCollection={selectedCollection}
             onSelect={handleCollectionSelect}
           />
@@ -409,7 +414,13 @@ export default function FTSClient({
                   </div>
 
                   <div className="flex-1 min-h-0 overflow-auto custom-scrollbar pb-20">
-                    <div className={visibleFields.length > 0 ? "[&>*]:border-b [&>*]:border-zinc-100 dark:[&>*]:border-white/5" : ""}>
+                    <div
+                      className={
+                        visibleFields.length > 0
+                          ? "[&>*]:border-b [&>*]:border-zinc-100 dark:[&>*]:border-white/5"
+                          : ""
+                      }
+                    >
                       {fields.length === 0 ? (
                         <div className="min-h-[260px] flex flex-col items-center justify-center gap-3 px-6 text-center">
                           <div className="w-9 h-9 rounded-md border border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-[#161616] flex items-center justify-center text-zinc-500">
@@ -534,7 +545,8 @@ export default function FTSClient({
                   ) : (
                     <div className="h-full flex items-center justify-center p-8">
                       <div className="text-[13px] text-zinc-500 text-center">
-                        Type a query and press Enter to test search against this collection.
+                        Type a query and press Enter to test search against this
+                        collection.
                       </div>
                     </div>
                   )}

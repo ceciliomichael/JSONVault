@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  AlertTriangle,
-  FolderOpen,
-  Plus,
-  Search,
-  Trash2,
-} from "lucide-react";
-import Link from "next/link";
+import { AlertTriangle, FolderOpen, Plus, Search, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import {
@@ -240,7 +233,9 @@ export default function CollectionsClient({
                 ))}
               </tr>
             </thead>
-            <tbody className={`divide-y divide-zinc-100 dark:divide-white/5 ${visibleCollections.length > 0 ? "border-b border-zinc-100 dark:border-white/5" : ""}`}>
+            <tbody
+              className={`divide-y divide-zinc-100 dark:divide-white/5 ${visibleCollections.length > 0 ? "border-b border-zinc-100 dark:border-white/5" : ""}`}
+            >
               {collections.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-6 py-16">

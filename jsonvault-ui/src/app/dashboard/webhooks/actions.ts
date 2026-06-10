@@ -2,9 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { createProjectCoreClient } from "@/lib/core";
+import type { WebhookConfig } from "@/lib/core/types";
 import { getSelectedDashboardProject } from "@/lib/projects";
 import { requireDashboardSession } from "@/lib/session";
-import type { WebhookConfig } from "@/lib/core/types";
 
 export interface SaveWebhooksResult {
   success: boolean;
@@ -36,16 +36,18 @@ export async function saveWebhooksAction(
     revalidatePath("/dashboard/webhooks");
     return {
       success: true,
-      message: webhooks.length > 0 
-        ? "Webhook targets updated successfully." 
-        : "All webhook targets removed.",
+      message:
+        webhooks.length > 0
+          ? "Webhook targets updated successfully."
+          : "All webhook targets removed.",
       webhookSecret: result.webhook_secret,
     };
   } catch (error) {
     console.error("Failed to save webhooks.", error);
     return {
       success: false,
-      message: error instanceof Error ? error.message : "Failed to save webhooks",
+      message:
+        error instanceof Error ? error.message : "Failed to save webhooks",
     };
   }
 }
@@ -74,7 +76,8 @@ export async function retryDeliveryAction(
     console.error("Failed to retry webhook delivery.", error);
     return {
       success: false,
-      message: error instanceof Error ? error.message : "Failed to retry delivery",
+      message:
+        error instanceof Error ? error.message : "Failed to retry delivery",
     };
   }
 }

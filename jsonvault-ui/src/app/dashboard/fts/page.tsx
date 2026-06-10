@@ -1,17 +1,11 @@
 import { redirect } from "next/navigation";
 import { listProjectCollections } from "@/lib/collections";
-import {
-  createProjectCoreClient,
-  hasDatabaseCapability,
-  isCoreApiError,
-} from "@/lib/core";
+import { createProjectCoreClient, isCoreApiError } from "@/lib/core";
 import { getSelectedDashboardProject } from "@/lib/projects";
 import { requireDashboardSession } from "@/lib/session";
 import FTSClient from "./FTSClient";
 
-type FTSSearchParams = Promise<
-  Record<string, string | string[] | undefined>
->;
+type FTSSearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 export default async function FTSPage({
   searchParams,
@@ -28,7 +22,7 @@ export default async function FTSPage({
   const requestedCollection = readFirst(params.collection);
   const searchQuery = readFirst(params.q);
   const client = createProjectCoreClient(project.database);
-  const identity = await getProjectIdentity(client);
+  const _identity = await getProjectIdentity(client);
   let collections: string[] = [];
   let initialFields: string[] = [];
   let results: Array<{ id: string; document: Record<string, unknown> }> = [];

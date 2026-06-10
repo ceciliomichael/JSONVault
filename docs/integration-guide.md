@@ -81,11 +81,21 @@ constraints, token ID, and capabilities.
 
 ## 📡 3. The API Reference
 
+### Base URL
+All endpoints documented below are relative to your project's unique Base URL. 
+You can find this URL in the **Connect** panel of your JSONVault Dashboard.
+
+**Format:** `https://your-host.com/api/v1/[project-id]`
+
+*(Example: `GET /collections` corresponds to `GET https://your-host.com/api/v1/[project-id]/collections`)*
+
+---
+
 ### Real-Time Subscriptions
 
 #### Stream Collection Updates
 Open a persistent HTTP connection to receive live document mutations.
-- **Request:** `GET /api/v1/{database}/{collection}/subscribe`
+- **Request:** `GET /{collection}/subscribe`
 - **Response:** Infinite stream of `text/event-stream`
 - **Event Format:**
   ```text
@@ -107,13 +117,13 @@ Use the standard `Last-Event-ID` header, or `?last_event_id=<sequence>`, to repl
 
 #### Publish Transient Message (Pub/Sub)
 Instantly broadcast a JSON message to all active SSE subscribers without saving it to the database disk. Perfect for ephemeral events like "User is typing...".
-- **Request:** `POST /api/v1/{database}/{collection}/publish`
+- **Request:** `POST /{collection}/publish`
 - **Body:** Any valid JSON object (Max 100KB).
 - **Response (202 Accepted):** `{"published": true, "database": "...", "collection": "..."}`
 
 #### Real-Time Presence
 Get the exact number of active SSE connections currently subscribed to a collection. Perfect for showing "Online Users".
-- **Request:** `GET /api/v1/{database}/{collection}/presence`
+- **Request:** `GET /{collection}/presence`
 - **Response (200 OK):** `{"database": "my_app", "collection": "users", "subscribers": 42}`
 
 ---
@@ -122,7 +132,7 @@ Get the exact number of active SSE connections currently subscribed to a collect
 
 #### List Documents
 Retrieve a paginated list of documents, optionally filtered and sorted directly in the query string.
-- **Request:** `GET /api/v1/{database}/{collection}`
+- **Request:** `GET /{collection}`
   - **Query Parameters:**
     - `limit` (max: 1000, default: 100)
     - `offset` (max: 10000, default: 0)
@@ -181,19 +191,19 @@ Example error:
 ```
 
 #### Create Document
-- **Request:** `POST /api/v1/{database}/{collection}`
+- **Request:** `POST /{collection}`
 - **Headers:** `X-Expire-In: <seconds>` (Optional: Automatically delete document after X seconds)
 - **Body:** Any valid JSON object.
 - **Response (201 Created):** Returns the auto-generated `id` and the generated `ETag` header.
 *(Note: `X-Expire-In` must be a positive integer number of seconds no greater than 31536000.)*
 
 #### Get Document by ID
-- **Request:** `GET /api/v1/{database}/{collection}/{id}`
+- **Request:** `GET /{collection}/{id}`
 - **Response (200 OK):** Returns the document and its `ETag` header.
 
 #### Update or Create Document (Upsert)
 Completely overwrites the document if it exists, or creates a new document using the `{id}` you provide.
-- **Request:** `PUT /api/v1/{database}/{collection}/{id}`
+- **Request:** `PUT /{collection}/{id}`
 - **Headers:** 
   - `If-Match: <your-etag>` (Optional, but highly recommended if updating)
   - `X-Expire-In: <seconds>` (Optional: Automatically delete document after X seconds)
@@ -203,12 +213,12 @@ Completely overwrites the document if it exists, or creates a new document using
 
 #### Partial Update Document (Merge)
 Updates specific fields while preserving the rest (e.g. only updating `status: "completed"`).
-- **Request:** `PATCH /api/v1/{database}/{collection}/{id}`
+- **Request:** `PATCH /{collection}/{id}`
 - **Headers:** `If-Match: <your-etag>` (Optional, but highly recommended)
 - **Body:** A JSON object containing only the fields to modify.
 
 #### Delete Document
-- **Request:** `DELETE /api/v1/{database}/{collection}/{id}`
+- **Request:** `DELETE /{collection}/{id}`
 - **Headers:** `If-Match: <your-etag>` (Optional)
 
 ---
@@ -220,7 +230,7 @@ Schema to a collection to enforce document shape.
 
 As an application developer:
 
-- **Inspect active schema:** `GET /api/v1/{database}/{collection}/schema`
+- **Inspect active schema:** `GET /{collection}/schema`
 - **No schema response:** `{"schema": null}`
 - **Validation failure:** `400 Bad Request` with error code `schema_validation_failed`
 
@@ -239,7 +249,7 @@ a host-configured query budget.
 As an application developer:
 
 - Use `filter[<field>]` normally.
-- Inspect configured indexes with `GET /api/v1/{database}/{collection}/indexes`.
+- Inspect configured indexes with `GET /{collection}/indexes`.
 - If a query returns `query_limit_exceeded`, reduce the page size, use a more
   selective filter, or ask the host/operator to add an index.
 
@@ -261,11 +271,11 @@ For multiple words, standard URL encoding applies (e.g. `fast+car`).
 
 ```bash
 # Find any users where "john" is mentioned in their name or bio
-curl "http://localhost:8080/api/v1/store/users?search=john" \
+curl "https://your-host.com/api/v1/[project-id]/users?search=john" \
   -H "Authorization: Bearer <your_jwt_token>"
 
 # Combine Full-Text Search with B-Tree filters
-curl "http://localhost:8080/api/v1/store/users?search=engineer&filter[status]=%22active%22" \
+curl "https://your-host.com/api/v1/[project-id]/users?search=engineer&filter[status]=%22active%22" \
   -H "Authorization: Bearer <your_jwt_token>"
 ```
 
@@ -278,7 +288,7 @@ Changing the FTS field list requires `fts:manage` or an admin key.
 
 JSONVault supports ACID-compliant atomic transactions, allowing you to update multiple documents at exactly the same time. If any single operation fails (e.g. invalid JSON, missing ETag), the entire transaction rolls back.
 
-- **Request:** `POST /api/v1/{database}/transactions`
+- **Request:** `POST /transactions`
 - **Limits:** Maximum 100 operations and 4MB cumulative operation body bytes.
 - **Body:**
   ```json
@@ -332,7 +342,7 @@ directly.
   `database: "*"` or admin.
 
 #### List Collections
-- **List:** `GET /api/v1/{database}/collections`
+- **List:** `GET /collections`
 - **Access:** Requires access to the database and a token broad enough to list
   collections, usually `collection: "*"` or admin.
 

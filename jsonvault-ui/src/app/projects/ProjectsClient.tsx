@@ -27,7 +27,7 @@ import {
   PrimaryButton,
   SecondaryButton,
 } from "@/components/ui";
-import { type DashboardProject, projectDatabaseFromName } from "@/lib/projects";
+import { type DashboardProject } from "@/lib/projects";
 import { formatDate } from "@/lib/utils";
 import {
   createProjectAction,
@@ -57,8 +57,6 @@ export default function ProjectsClient({
   );
   const [creating, setCreating] = useState(false);
   const [projectName, setProjectName] = useState("");
-  const [databaseId, setDatabaseId] = useState("");
-  const [databaseEdited, setDatabaseEdited] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DashboardProject | null>(
     null,
   );
@@ -71,8 +69,6 @@ export default function ProjectsClient({
     if (state.status === "error") {
       setCreating(true);
       setProjectName(state.values.displayName);
-      setDatabaseId(state.values.database);
-      setDatabaseEdited(true);
     }
   }, [state]);
 
@@ -93,14 +89,11 @@ export default function ProjectsClient({
 
   function openCreate() {
     setProjectName("");
-    setDatabaseId("");
-    setDatabaseEdited(false);
     setCreating(true);
   }
 
   function handleProjectNameChange(value: string) {
     setProjectName(value);
-    if (!databaseEdited) setDatabaseId(projectDatabaseFromName(value));
   }
 
   function openDeleteProject(project: DashboardProject) {
@@ -452,7 +445,7 @@ export default function ProjectsClient({
                 Cancel
               </SecondaryButton>
               <PrimaryButton
-                disabled={pending || !projectName.trim() || !databaseId.trim()}
+                disabled={pending || !projectName.trim()}
                 form="new-project-form"
                 type="submit"
               >
@@ -492,30 +485,6 @@ export default function ProjectsClient({
                 required
                 className="w-full text-[13px] bg-zinc-50 dark:bg-[#121212] border border-zinc-200 dark:border-white/10 rounded-md px-4 py-2.5 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 transition-colors shadow-inner"
               />
-            </div>
-            <div>
-              <label
-                htmlFor="database-id"
-                className="block text-[12px] font-medium text-zinc-700 dark:text-zinc-300 mb-2"
-              >
-                Database ID
-              </label>
-              <input
-                id="database-id"
-                name="database"
-                type="text"
-                value={databaseId}
-                onChange={(event) => {
-                  setDatabaseEdited(true);
-                  setDatabaseId(event.target.value);
-                }}
-                placeholder="todo_app"
-                required
-                className="w-full font-mono text-[13px] bg-zinc-50 dark:bg-[#121212] border border-zinc-200 dark:border-white/10 rounded-md px-4 py-2.5 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 transition-colors shadow-inner"
-              />
-              <p className="text-[12px] text-zinc-500 mt-2 leading-relaxed">
-                Used in API paths, collection URLs, and generated key scope.
-              </p>
             </div>
           </form>
         </Modal>

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import DashboardShell from "@/components/DashboardShell";
 import { createProjectCoreClient } from "@/lib/core";
+import { getCoreApiBaseUrl } from "@/lib/core/config";
 import { getSelectedDashboardProject } from "@/lib/projects";
 import { requireDashboardSession } from "@/lib/session";
 import type { MeResponse } from "@/lib/types";
@@ -28,6 +29,7 @@ export default async function DashboardLayout({
       project={project}
       userEmail={session.email}
       userName={session.name}
+      apiUrl={getCoreApiBaseUrl()}
     >
       {children}
     </DashboardShell>

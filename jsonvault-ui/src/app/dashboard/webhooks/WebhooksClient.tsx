@@ -21,8 +21,8 @@ import {
   WorkspacePage,
   WorkspaceTable,
 } from "@/components/Workspace";
-import { formatDate } from "@/lib/utils";
 import type { WebhookConfig, WebhookDelivery } from "@/lib/core/types";
+import { formatDate } from "@/lib/utils";
 import { retryDeliveryAction, saveWebhooksAction } from "./actions";
 
 const DELIVERY_BADGE: Record<
@@ -63,7 +63,10 @@ export default function WebhooksClient({
     "update",
     "delete",
   ]);
-  const [notice, setNotice] = useState<{ status: "success" | "danger" | "warning", message: string } | null>(null);
+  const [notice, setNotice] = useState<{
+    status: "success" | "danger" | "warning";
+    message: string;
+  } | null>(null);
   const [secret, setSecret] = useState("");
   const [collectionSearch, setCollectionSearch] = useState("");
   const [targetSearch, setTargetSearch] = useState("");
@@ -105,7 +108,9 @@ export default function WebhooksClient({
     setTargetSearch("");
     setNotice(null);
     setSecret("");
-    router.push(`/dashboard/webhooks?collection=${encodeURIComponent(collection)}`);
+    router.push(
+      `/dashboard/webhooks?collection=${encodeURIComponent(collection)}`,
+    );
   }
 
   function openAddTarget() {
@@ -134,7 +139,7 @@ export default function WebhooksClient({
     startTransition(async () => {
       // Append the new target to existing targets
       const nextWebhooks = [...webhooks, { url: newUrl, events: newEvents }];
-      
+
       const result = await saveWebhooksAction(
         projectId,
         database,
@@ -162,11 +167,11 @@ export default function WebhooksClient({
   function confirmRemoveSelectedTargets() {
     if (targetRemoveConfirm !== "delete") return;
     if (targetRemoveUrls.length === 0) return;
-    
+
     startTransition(async () => {
       const urlsToRemove = new Set(targetRemoveUrls);
-      const nextWebhooks = webhooks.filter(w => !urlsToRemove.has(w.url));
-      
+      const nextWebhooks = webhooks.filter((w) => !urlsToRemove.has(w.url));
+
       const result = await saveWebhooksAction(
         projectId,
         database,
@@ -177,9 +182,10 @@ export default function WebhooksClient({
       if (result.success) {
         setNotice({
           status: "success",
-          message: targetRemoveUrls.length === 1
-            ? "Removed webhook target."
-            : `Removed ${targetRemoveUrls.length} webhook targets.`,
+          message:
+            targetRemoveUrls.length === 1
+              ? "Removed webhook target."
+              : `Removed ${targetRemoveUrls.length} webhook targets.`,
         });
         setSelectedTargetUrls([]);
         setTargetRemoveUrls([]);
@@ -246,7 +252,7 @@ export default function WebhooksClient({
       <div className="h-full flex min-h-0 min-w-0 overflow-hidden">
         <CollectionPanel
           title="Webhooks"
-          collections={collections.map(c => ({ name: c }) as any)}
+          collections={collections.map((c) => ({ name: c }))}
           selectedCollection={selectedCollection}
           onSelect={handleCollectionSelect}
           search={collectionSearch}
@@ -285,7 +291,10 @@ export default function WebhooksClient({
                   onClick={() => {
                     startTransition(() => {
                       router.refresh();
-                      setNotice({ status: "success", message: "Delivery records are up to date." });
+                      setNotice({
+                        status: "success",
+                        message: "Delivery records are up to date.",
+                      });
                     });
                   }}
                   disabled={isPending}
@@ -380,7 +389,9 @@ export default function WebhooksClient({
                       ))}
                     </tr>
                   </thead>
-                  <tbody className={`divide-y divide-zinc-100 dark:divide-white/5 ${visibleTargets.length > 0 ? "border-b border-zinc-100 dark:border-white/5" : ""}`}>
+                  <tbody
+                    className={`divide-y divide-zinc-100 dark:divide-white/5 ${visibleTargets.length > 0 ? "border-b border-zinc-100 dark:border-white/5" : ""}`}
+                  >
                     {webhooks.length === 0 ? (
                       <tr>
                         <td colSpan={3}>
@@ -503,7 +514,9 @@ export default function WebhooksClient({
                           {delivery.attempts}
                         </td>
                         <td className="px-4 py-3 text-zinc-500 text-[12px] whitespace-nowrap border-r border-zinc-100 dark:border-white/5">
-                          {formatDate(new Date(delivery.updated_at * 1000).toISOString())}
+                          {formatDate(
+                            new Date(delivery.updated_at * 1000).toISOString(),
+                          )}
                         </td>
                         <td className="px-4 py-3 text-right">
                           {delivery.status === "failed" && (

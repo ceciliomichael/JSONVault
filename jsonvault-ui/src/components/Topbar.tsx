@@ -8,10 +8,12 @@ import {
   Lightbulb,
   Search,
   Table2,
+  Plug,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { BrandMark } from "@/components/BrandMark";
+import { ConnectPanel } from "@/components/ConnectPanel";
 import ProfileMenu from "@/components/ProfileMenu";
 import { Badge, Dropdown, DropdownItem } from "./ui";
 
@@ -23,6 +25,7 @@ interface TopbarProps {
   selectedCollection?: string;
   userEmail?: string;
   userName?: string;
+  apiUrl?: string;
   onDbChange?: (db: string) => void;
   onCollectionChange?: (col: string) => void;
 }
@@ -35,11 +38,13 @@ export default function Topbar({
   selectedCollection = "",
   userEmail = "",
   userName = "",
+  apiUrl = "",
   onDbChange,
   onCollectionChange,
 }: TopbarProps) {
   const pathname = usePathname();
   const [projectQuery, setProjectQuery] = useState("");
+  const [isConnectOpen, setIsConnectOpen] = useState(false);
   const segments = pathname.split("/").filter(Boolean);
   const currentSection = segments.length > 1 ? segments[1] : "overview";
   const selectedDbLabel = selectedDb
@@ -182,6 +187,15 @@ export default function Topbar({
           </div>
         </Dropdown>
 
+        <button
+          type="button"
+          onClick={() => setIsConnectOpen(true)}
+          className="flex items-center gap-1.5 h-7 px-3 rounded-full border border-zinc-200 dark:border-white/10 text-[12px] font-medium text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors ml-1"
+        >
+          <Plug size={13} className="text-zinc-500" />
+          Connect
+        </button>
+
         {showCollection && (
           <>
             <span className="text-zinc-300 dark:text-zinc-700">/</span>
@@ -240,6 +254,13 @@ export default function Topbar({
         </button>
         <ProfileMenu userEmail={userEmail} userName={userName} />
       </div>
+
+      <ConnectPanel 
+        database={selectedDb} 
+        isOpen={isConnectOpen} 
+        apiUrl={apiUrl}
+        onClose={() => setIsConnectOpen(false)} 
+      />
     </header>
   );
 }

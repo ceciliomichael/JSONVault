@@ -1,9 +1,8 @@
 import { redirect } from "next/navigation";
-import { requireDashboardSession } from "@/lib/session";
-import { getSelectedDashboardProject } from "@/lib/projects";
 import { createProjectCoreClient } from "@/lib/core";
+import { getSelectedDashboardProject } from "@/lib/projects";
+import { requireDashboardSession } from "@/lib/session";
 import WebhooksClient from "./WebhooksClient";
-import { WorkspacePage } from "@/components/Workspace";
 
 export default async function WebhooksPage(props: {
   searchParams: Promise<{ collection?: string }>;
@@ -17,12 +16,12 @@ export default async function WebhooksPage(props: {
   }
 
   const client = createProjectCoreClient(project.database);
-  
+
   // Only fetching data if the user has read capabilities
   const collections = await client.listCollections({
     database: project.database,
   });
-  
+
   // Sort collections alphabetically
   collections.sort();
 

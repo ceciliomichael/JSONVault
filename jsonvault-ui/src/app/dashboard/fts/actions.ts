@@ -29,15 +29,19 @@ export async function saveFTSFieldsAction(
     revalidatePath("/dashboard/fts");
     return {
       success: true,
-      message: fields.length > 0
-        ? `Configured ${fields.length} searchable ${fields.length === 1 ? "field" : "fields"}.`
-        : "Removed all searchable fields.",
+      message:
+        fields.length > 0
+          ? `Configured ${fields.length} searchable ${fields.length === 1 ? "field" : "fields"}.`
+          : "Removed all searchable fields.",
     };
   } catch (error) {
     console.error("Failed to save FTS fields.", error);
     return {
       success: false,
-      message: error instanceof Error ? error.message : "Failed to save searchable fields",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Failed to save searchable fields",
     };
   }
 }

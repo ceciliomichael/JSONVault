@@ -3,7 +3,6 @@ export interface ProjectActionState {
   message: string;
   values: {
     displayName: string;
-    database: string;
   };
 }
 
@@ -12,6 +11,5 @@ export const initialProjectActionState: ProjectActionState = {
   message: "",
   values: {
     displayName: "",
-    database: "",
   },
 };

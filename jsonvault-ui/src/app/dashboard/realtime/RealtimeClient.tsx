@@ -101,7 +101,10 @@ export default function RealtimeClient({
       if (es.readyState === EventSource.CLOSED) {
         console.error("SSE connection closed:", e);
         stopListening();
-        setNotice({ status: "danger", message: "Connection lost. Click Start listening to reconnect." });
+        setNotice({
+          status: "danger",
+          message: "Connection lost. Click Start listening to reconnect.",
+        });
       }
     };
 
