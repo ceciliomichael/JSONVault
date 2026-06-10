@@ -1,7 +1,7 @@
 package store
 
 import (
-	"encoding/json"
+	stdjson "encoding/json"
 	"log/slog"
 	"sync"
 	"time"
@@ -14,11 +14,18 @@ type Event struct {
 	Database   string          `json:"database"`
 	Collection string          `json:"collection"`
 	DocumentID string          `json:"document_id"`
-	ETag       string          `json:"etag,omitempty"`     // The new ETag
-	Document   json.RawMessage `json:"document,omitempty"` // Included for inserts/updates
+	ETag       string             `json:"etag,omitempty"`     // The new ETag
+	Document   stdjson.RawMessage `json:"document,omitempty"` // Included for inserts/updates
 }
 
-// Subscription represents an active client listening to a specific collection.
+// PresenceEntry represents an active client tracking its online status.
+type PresenceEntry struct {
+	ClientID  string             `json:"client_id"`
+	Metadata  stdjson.RawMessage `json:"metadata,omitempty"`
+	JoinedAt  time.Time          `json:"joined_at"`
+	ExpiresAt time.Time          `json:"expires_at"`
+}
+
 type Subscription struct {
 	Database   string
 	Collection string
@@ -84,7 +91,7 @@ func (s *Store) Unsubscribe(sub *Subscription) {
 	}
 }
 
-// GetSubscriberCount returns the number of active subscribers for a collection.
+// GetSubscriberCount returns the raw number of active SSE subscribers for a collection.
 func (s *Store) GetSubscriberCount(database, collection string) int {
 	s.subMu.RLock()
 	defer s.subMu.RUnlock()

@@ -51,43 +51,43 @@ When you read a document, you get an `ETag`. When you update that document, you 
 
 ---
 
-## 🔐 2. Authentication & API Keys
+## 🔐 2. Authentication & Configuration
 
-JSONVault uses **scoped JSON Web Tokens (JWTs)** for access.
+To connect your application to your JSONVault database, you need two environment variables from your Dashboard's **Connect** panel:
 
-You should receive an API Key (JWT) from your Dashboard Provider.
+1. `JSONVAULT_API_URL`: Your project's unique base URL.
+2. `JSONVAULT_API_KEY`: Your secret access token.
+
+### Setting up your environment
+
+Add these to your app's `.env` file:
+```bash
+JSONVAULT_API_URL="https://your-host.com/api/v1/[database-id]"
+JSONVAULT_API_KEY="<your-api-key>"
+```
 
 ### Accessing the Database
-Every HTTP request (except `/healthz`) MUST include the generated token in the header:
+Every HTTP request (except `/healthz`) MUST include your API Key in the `Authorization` header:
 
 ```http
-Authorization: Bearer <your-generated-jwt-token>
+Authorization: Bearer $JSONVAULT_API_KEY
 Content-Type: application/json
 ```
 *(Note: `Content-Type` is strictly required for POST, PUT, and PATCH requests).*
 
-If you receive a `403 Forbidden` error or a `401 Unauthorized` error, your JWT Token does not have the required permissions for that specific database/collection.
+Under the hood, your API key is a scoped JSON Web Token (JWT). If you receive a `403 Forbidden` error or a `401 Unauthorized` error, your key lacks the required permissions for that specific operation.
 
-Normal `read_write` keys are limited to document CRUD, transactions, and
-transient publish within their JWT database/collection constraints. Schema,
-index, FTS, webhook, collection, and key management require explicit project
-management capabilities or an admin key. Backup and server setting management
-remain host/operator responsibilities.
+Normal `read_write` keys are limited to document CRUD, transactions, and transient publish operations. Admin actions (like managing schemas, indexes, webhooks, and full-text search) require elevated project tokens, which should be kept strictly in your trusted backend code.
 
-Use `GET /api/v1/me` to inspect your token's scope, database/collection
-constraints, token ID, and capabilities.
+Use `GET $JSONVAULT_API_URL/../me` (relative to v1) or the dashboard to inspect your token's capabilities.
 
 ---
 
 ## 📡 3. The API Reference
 
-### Base URL
-All endpoints documented below are relative to your project's unique Base URL. 
-You can find this URL in the **Connect** panel of your JSONVault Dashboard.
+All endpoints documented below are relative to your `$JSONVAULT_API_URL`.
 
-**Format:** `https://your-host.com/api/v1/[project-id]`
-
-*(Example: `GET /collections` corresponds to `GET https://your-host.com/api/v1/[project-id]/collections`)*
+*(Example: `GET /collections` corresponds to `GET $JSONVAULT_API_URL/collections`)*
 
 ---
 
@@ -122,9 +122,45 @@ Instantly broadcast a JSON message to all active SSE subscribers without saving 
 - **Response (202 Accepted):** `{"published": true, "database": "...", "collection": "..."}`
 
 #### Real-Time Presence
-Get the exact number of active SSE connections currently subscribed to a collection. Perfect for showing "Online Users".
+JSONVault features a native, heartbeat-driven presence system for tracking online users. Presence is decoupled from SSE connections, meaning multiple tabs from the same user count as a single active session.
+
+**1. Join Presence (Heartbeat)**
+To join presence, clients send a `POST /heartbeat` request. This must be repeated every 15 seconds to keep the session alive.
+- **Request:** `POST /{collection}/heartbeat`
+- **Body:** `{"client_id": "user_123", "metadata": {"name": "Alice"}}` (metadata is optional)
+- **Response (200 OK):** `{"ok": true}`
+
+**2. Leave Presence Gracefully**
+When a user navigates away, you can use `navigator.sendBeacon` to instantly evict them from the presence list.
+- **Request:** `DELETE /{collection}/heartbeat`
+- **Body:** `{"client_id": "user_123"}`
+- **Response (200 OK):** `{"ok": true}`
+*(Note: If a client crashes or loses connection without sending a leave request, they are automatically evicted after 30 seconds).*
+
+**3. Get Active Clients**
+Retrieve the current list of online clients and their metadata.
 - **Request:** `GET /{collection}/presence`
-- **Response (200 OK):** `{"database": "my_app", "collection": "users", "subscribers": 42}`
+- **Response (200 OK):** 
+```json
+{
+  "database": "my_app", 
+  "collection": "users", 
+  "count": 1,
+  "clients": [
+    {"client_id": "user_123", "metadata": {"name": "Alice"}, "joined_at": "...", "expires_at": "..."}
+  ]
+}
+```
+
+> [!TIP]
+> **Listen for Presence Events:**
+> When you subscribe to a collection (`GET /{collection}/subscribe`), you will automatically receive `presence_join` and `presence_leave` SSE events when clients heartbeat for the first time or leave/expire. 
+> 
+> **Best Practice:** Do **not** use `+1` or `-1` to increment your local counter when receiving these events. Deltas are extremely fragile against dropped connections or race conditions during page reloads. Instead, treat these events as a signal to **re-fetch** the authoritative count from `GET /{collection}/presence`.
+
+> [!WARNING]
+> **Beware of Fetch Caching:**
+> If you proxy the `/presence` or SSE endpoints through a backend (like Next.js API Routes), ensure you pass `{ cache: 'no-store' }` to your upstream `fetch`. Otherwise, Next.js will aggressively cache the initial `GET /presence` request permanently, leaving your UI completely out of sync! For SSE connections, ensure you pass the request abort signal (`signal: request.signal`) so idle upstream connections are properly closed when the browser navigates away.
 
 ---
 
@@ -271,12 +307,12 @@ For multiple words, standard URL encoding applies (e.g. `fast+car`).
 
 ```bash
 # Find any users where "john" is mentioned in their name or bio
-curl "https://your-host.com/api/v1/[project-id]/users?search=john" \
-  -H "Authorization: Bearer <your_jwt_token>"
+curl "$JSONVAULT_API_URL/users?search=john" \
+  -H "Authorization: Bearer $JSONVAULT_API_KEY"
 
 # Combine Full-Text Search with B-Tree filters
-curl "https://your-host.com/api/v1/[project-id]/users?search=engineer&filter[status]=%22active%22" \
-  -H "Authorization: Bearer <your_jwt_token>"
+curl "$JSONVAULT_API_URL/users?search=engineer&filter[status]=%22active%22" \
+  -H "Authorization: Bearer $JSONVAULT_API_KEY"
 ```
 
 If FTS is not configured for the collection, `search` returns no matches.

@@ -33,6 +33,7 @@ export async function GET(
 
     const response = await fetch(backendUrl, {
       method: "GET",
+      signal: request.signal,
       headers: {
         Authorization: `Bearer ${config.apiKey}`,
         Accept: "text/event-stream",

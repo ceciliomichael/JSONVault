@@ -296,10 +296,18 @@ export interface CancelOperationResult {
   updated_at: string;
 }
 
+export interface PresenceClient {
+  client_id: string;
+  metadata?: Record<string, unknown>;
+  joined_at: string;
+  expires_at: string;
+}
+
 export interface GetPresenceResult {
   database: string;
   collection: string;
-  subscribers: number;
+  count: number;
+  clients: PresenceClient[];
 }
 
 export interface PublishEventResult {

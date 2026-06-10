@@ -439,7 +439,7 @@ export class CoreClient {
   ): Promise<GetPresenceResult> {
     return this.request<GetPresenceResult>(
       `/api/v1/${encodeURIComponent(database)}/${encodeURIComponent(collection)}/presence`,
-      { method: "GET" },
+      { method: "GET", cache: "no-store" },
     );
   }
 

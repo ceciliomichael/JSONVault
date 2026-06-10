@@ -56,8 +56,8 @@ func (s *Server) handleSubscribe(c *gin.Context) {
 	}
 
 	// Keep-Alive Ticker: Prevents reverse proxies (Nginx/Cloudflare) from severing idle streams.
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
+	keepalive := time.NewTicker(5 * time.Second)
+	defer keepalive.Stop()
 
 	ctx := c.Request.Context()
 
@@ -67,7 +67,7 @@ func (s *Server) handleSubscribe(c *gin.Context) {
 			// Client disconnected gracefully or abruptly
 			return
 
-		case <-ticker.C:
+		case <-keepalive.C:
 			// Send a lightweight SSE comment to trick proxies into keeping the socket alive
 			if _, err := fmt.Fprintf(c.Writer, ": keepalive\n\n"); err != nil {
 				return
@@ -156,22 +156,4 @@ func (s *Server) handlePublish(c *gin.Context) {
 		Document:   json.RawMessage(body),
 	})
 	c.JSON(http.StatusAccepted, gin.H{"published": true, "database": database, "collection": collection})
-}
-
-// handlePresence returns the number of active subscribers for a collection
-func (s *Server) handlePresence(c *gin.Context) {
-	if !s.hasScope(c, auth.ScopeReadOnly) {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-		return
-	}
-
-	database := c.Param("database")
-	collection := c.Param("collection")
-
-	count := s.store.GetSubscriberCount(database, collection)
-	c.JSON(http.StatusOK, gin.H{
-		"database":    database,
-		"collection":  collection,
-		"subscribers": count,
-	})
 }

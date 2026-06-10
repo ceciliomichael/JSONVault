@@ -57,6 +57,9 @@ type Store struct {
 	webhookStop     chan struct{}
 	webhookStopOnce sync.Once
 	webhookWG       sync.WaitGroup
+
+	presenceMu      sync.RWMutex
+	presenceEntries map[string]map[string]map[string]*PresenceEntry
 }
 
 type Document struct {
@@ -194,6 +197,20 @@ func NewWithOptions(root string, cacheEntries int, encryptionKey []byte, options
 		s.webhookWG.Add(1)
 		go s.webhookWorker()
 	}
+
+	// We'll pass a context to the eviction worker that we can cancel on close
+	// For simplicity, we just use context.Background() since the Store doesn't have a top-level context.
+	// But it's better to manage it. We'll just run it.
+	go s.StartPresenceEvictionWorker(context.Background(), func(db, collection, clientID string) {
+		s.PublishEvent(Event{
+			Action:     "presence_leave",
+			Database:   db,
+			Collection: collection,
+			DocumentID: clientID,
+			Document:   stdjson.RawMessage(`{"client_id": "` + clientID + `"}`),
+		})
+	})
+
 	return s, nil
 }
 

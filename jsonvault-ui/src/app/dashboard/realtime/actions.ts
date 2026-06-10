@@ -26,7 +26,7 @@ export async function getPresenceAction(
     const result = await client.getPresence(database, collection);
     return {
       success: true,
-      presence: result.subscribers,
+      presence: result.count,
     };
   } catch (error: unknown) {
     console.error("Failed to fetch presence:", error);

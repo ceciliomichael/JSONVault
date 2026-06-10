@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	stdjson "encoding/json"
 	"io"
 	"net/http"
 
@@ -58,6 +59,10 @@ type Store interface {
 	ReplayEvents(database, collection string, after uint64, limit int) ([]store.Event, error)
 	PublishEvent(event store.Event)
 	GetSubscriberCount(database, collection string) int
+
+	Heartbeat(database, collection, clientID string, metadata stdjson.RawMessage, ttl time.Duration) (bool, error)
+	LeavePresence(database, collection, clientID string) bool
+	ListPresence(database, collection string) []store.PresenceEntry
 }
 
 type Options struct {
@@ -187,6 +192,8 @@ func NewHandler(db Store, authenticator *auth.Authenticator, options Options) ht
 
 		v1.GET("/:database/:collection/subscribe", server.handleSubscribe)
 		v1.POST("/:database/:collection/publish", server.handlePublish)
+		v1.POST("/:database/:collection/heartbeat", server.handleHeartbeat)
+		v1.DELETE("/:database/:collection/heartbeat", server.handleLeavePresence)
 		v1.GET("/:database/:collection/presence", server.handlePresence)
 
 		v1.GET("/:database/:collection/:id", server.handleDocumentByID)
@@ -278,6 +285,8 @@ func NewUnauthenticatedHandler(db Store, options Options) http.Handler {
 
 		v1.GET("/:database/:collection/subscribe", server.handleSubscribe)
 		v1.POST("/:database/:collection/publish", server.handlePublish)
+		v1.POST("/:database/:collection/heartbeat", server.handleHeartbeat)
+		v1.DELETE("/:database/:collection/heartbeat", server.handleLeavePresence)
 		v1.GET("/:database/:collection/presence", server.handlePresence)
 
 		v1.GET("/:database/:collection/:id", server.handleDocumentByID)
