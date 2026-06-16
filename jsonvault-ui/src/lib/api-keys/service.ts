@@ -281,6 +281,12 @@ function mapApiKeyCoreError(error: unknown, action: string): Error {
   if (isCoreApiError(error) && error.status === 501) {
     return new ApiKeysUnavailableError("Core authentication is disabled.");
   }
+  if (isCoreApiError(error) && error.status === 409) {
+    return new ApiKeyValidationError(error.message || "A conflict occurred.");
+  }
+  if (isCoreApiError(error) && error.status === 429) {
+    return new ApiKeysUnavailableError("Rate limit exceeded. Please try again later.");
+  }
   return error instanceof Error ? error : new Error(String(error));
 }
 
@@ -303,5 +309,13 @@ function mapApiKeyMetadataCoreError(error: unknown, action: string): Error {
       "Dashboard API key metadata storage was not found.",
     );
   }
+  if (isCoreApiError(error) && error.status === 409) {
+    return new ApiKeyValidationError(error.message || "A conflict occurred.");
+  }
+  if (isCoreApiError(error) && error.status === 429) {
+    return new ApiKeysUnavailableError("Rate limit exceeded. Please try again later.");
+  }
   return error instanceof Error ? error : new Error(String(error));
 }
+
+

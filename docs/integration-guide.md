@@ -185,7 +185,16 @@ Retrieve a paginated list of documents, optionally filtered and sorted directly 
     - `search` (full-text search query, only useful when the host has enabled FTS for the collection)
     - `filter[<field>]` (e.g., `?filter[status]=%22active%22&filter[age]=30`)
       *Note: Filter values must be valid JSON strings (e.g. `%22string%22` for strings, `true` for booleans, `42` for numbers).*
-- **Response (200 OK):** An array of documents. (Pagination metadata is returned in `X-Total-Count`, `X-Limit`, `X-Offset` headers).
+- **Response (200 OK):** An array of document envelopes. (Pagination metadata is returned in `X-Total-Count`, `X-Limit`, `X-Offset` headers).
+  ```json
+  [
+    {
+      "id": "123",
+      "document": { "your": "data" },
+      "etag": "xyz123"
+    }
+  ]
+  ```
 
 If a query exceeds configured scan, response, or time budgets, JSONVault returns
 `query_limit_exceeded`. Lower the page size, use a more selective filter, or
@@ -239,12 +248,26 @@ Example error:
 - **Request:** `POST /{collection}`
 - **Headers:** `X-Expire-In: <seconds>` (Optional: Automatically delete document after X seconds)
 - **Body:** Any valid JSON object.
-- **Response (201 Created):** Returns the auto-generated `id` and the generated `ETag` header.
+- **Response (201 Created):** Returns the enveloped document containing the auto-generated `id` and `etag`.
+  ```json
+  {
+    "id": "456",
+    "document": { "your": "data" },
+    "etag": "abc987"
+  }
+  ```
 *(Note: `X-Expire-In` must be a positive integer number of seconds no greater than 31536000.)*
 
 #### Get Document by ID
 - **Request:** `GET /{collection}/{id}`
-- **Response (200 OK):** Returns the document and its `ETag` header.
+- **Response (200 OK):** Returns the enveloped document containing the `id`, `document` payload, and its `etag`.
+  ```json
+  {
+    "id": "123",
+    "document": { "your": "data" },
+    "etag": "xyz123"
+  }
+  ```
 
 #### Update or Create Document (Upsert)
 Completely overwrites the document if it exists, or creates a new document using the `{id}` you provide.
@@ -253,7 +276,7 @@ Completely overwrites the document if it exists, or creates a new document using
   - `If-Match: <your-etag>` (Optional, but highly recommended if updating)
   - `X-Expire-In: <seconds>` (Optional: Automatically delete document after X seconds)
 - **Body:** The full new JSON object.
-- **Response (200 OK):** Returns the upserted document and its `ETag` header.
+- **Response (200 OK):** Returns the upserted document enveloped with its `id` and `etag`.
 *(Note: `PUT` without `X-Expire-In` clears an existing TTL for that document. `PATCH` preserves the existing TTL.)*
 
 #### Partial Update Document (Merge)

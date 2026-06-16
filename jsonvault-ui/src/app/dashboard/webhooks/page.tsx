@@ -17,10 +17,15 @@ export default async function WebhooksPage(props: {
 
   const client = createProjectCoreClient(project.database);
 
-  // Only fetching data if the user has read capabilities
-  const collections = await client.listCollections({
-    database: project.database,
-  });
+  let collections: string[] = [];
+  try {
+    // Only fetching data if the user has read capabilities
+    collections = await client.listCollections({
+      database: project.database,
+    });
+  } catch (error) {
+    console.error("Failed to fetch collections:", error);
+  }
 
   // Sort collections alphabetically
   collections.sort();

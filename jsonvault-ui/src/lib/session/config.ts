@@ -30,10 +30,5 @@ export function getDashboardSessionConfig(): DashboardSessionConfig {
 }
 
 function readDashboardSessionSecret(): string {
-  const dedicatedSecret = readServerEnv("JSONVAULT_DASHBOARD_SESSION_SECRET");
-  if (dedicatedSecret) {
-    return dedicatedSecret;
-  }
-
-  return readRequiredServerEnv("JSONVAULT_JWT_SECRET");
+  return readRequiredServerEnv("JSONVAULT_DASHBOARD_SESSION_SECRET");
 }

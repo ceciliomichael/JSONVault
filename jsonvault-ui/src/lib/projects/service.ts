@@ -251,5 +251,12 @@ function mapProjectCoreError(error: unknown, action: string): Error {
       `Dashboard Core API key cannot ${action}.`,
     );
   }
+  if (isCoreApiError(error) && error.status === 409) {
+    return new DashboardProjectValidationError(error.message || "A conflict occurred.");
+  }
+  if (isCoreApiError(error) && error.status === 429) {
+    return new DashboardProjectsUnavailableError("Rate limit exceeded. Please try again later.");
+  }
   return error instanceof Error ? error : new Error(String(error));
 }
+

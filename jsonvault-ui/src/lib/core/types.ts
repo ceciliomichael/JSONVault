@@ -34,6 +34,14 @@ export interface DeleteDocumentParams {
   expectedEtag?: string;
 }
 
+export interface CreateDatabaseParams {
+  name: string;
+}
+
+export interface CreateDatabaseResult {
+  name: string;
+  created: boolean;
+}
 export interface ListCollectionsParams {
   database: string;
 }
@@ -315,3 +323,4 @@ export interface PublishEventResult {
   database: string;
   collection: string;
 }
+

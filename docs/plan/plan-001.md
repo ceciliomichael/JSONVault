@@ -500,7 +500,7 @@ foundation should stay thin and grow as each page needs real Core behavior.
 - [x] **Realtime page**: connect to real SSE/presence/publish behavior through a
       safe auth boundary.
 - [x] **Docs page**: MDX docs route and dashboard overview docs link.
-- [ ] **Cleanup/final verification**: remove stale preview flags, add missing
+- [x] **Cleanup/final verification**: remove stale preview flags, add missing
       tests, and complete final full-flow verification evidence.
 
 The detailed checklists below remain the responsibility map, but execution
@@ -532,9 +532,9 @@ follows the page slice order above.
 - [x] Add typed helpers for collections, document updates/deletes, schemas,
       indexes, and admin key creation where permitted.
 - [x] Add typed helpers for FTS, webhooks, operations, presence, and publish.
-- [ ] Add typed Core database management helpers if explicit database
+- [x] Add typed Core database management helpers if explicit database
       management is required beyond Core lazy creation.
-- [ ] Add tests for URL joining, auth headers, JSON serialization, ETag
+- [x] Add tests for URL joining, auth headers, JSON serialization, ETag
       extraction, pagination headers, and Core error parsing.
 
 ### Phase 2: Dashboard Server API Boundary
@@ -544,7 +544,7 @@ follows the page slice order above.
 - [x] Return sanitized data to browser components.
 - [x] Map common Core `401`, `403`, `404`, `412`, and `422` failures into
       dashboard-safe error messages where current slices need them.
-- [ ] Add complete status-specific mapping for `409` and `429` across all
+- [x] Add complete status-specific mapping for `409` and `429` across all
       dashboard slices.
 - [x] Add cache/no-store behavior where data must be fresh.
 
@@ -556,7 +556,7 @@ follows the page slice order above.
 - [x] Hash passwords server-side.
 - [x] Store dashboard session in an HTTP-only cookie.
 - [x] Add logout.
-- [ ] Remove the dashboard session fallback to `JSONVAULT_JWT_SECRET`; sessions
+- [x] Remove the dashboard session fallback to `JSONVAULT_JWT_SECRET`; sessions
       should require or use `JSONVAULT_DASHBOARD_SESSION_SECRET` without Core
       JWT secret coupling.
 
@@ -582,14 +582,14 @@ follows the page slice order above.
 
 ### Phase 5: Replace Mock Store Incrementally
 
-- [ ] Remove or explicitly gate the stale `DASHBOARD_PREVIEW_MODE = true`
+- [x] Remove or explicitly gate the stale `DASHBOARD_PREVIEW_MODE = true`
       constant.
 - [x] Build a real data adapter with a similar shape to the current dashboard
       store so pages can migrate incrementally.
 - [x] Start with low-risk reads:
       `GET /api/v1/me`,
       `GET /api/v1/{database}/collections`.
-- [ ] Add `GET /api/v1/databases` wiring only if the dashboard needs explicit
+- [x] Add `GET /api/v1/databases` wiring only if the dashboard needs explicit
       Core database listing.
 - [x] Then wire document list/read/create/edit/delete.
 - [x] Then wire collection create/delete.
@@ -638,11 +638,11 @@ follows the page slice order above.
       `jsonvault-core` instance.
 - [x] Collect user feedback after each completed slice before implementing the
       next slice.
-- [ ] Run relevant unit tests for the Core client.
+- [x] Run relevant unit tests for the Core client.
 - [x] Run `npm run build`.
 - [x] Run targeted Biome checks for touched files.
 - [x] Test with a local `jsonvault-core` instance.
-- [ ] Verify actual secret values are absent from client bundles and browser
+- [x] Verify actual secret values are absent from client bundles and browser
       responses; current static bundle scan found placeholder
       `JSONVAULT_API_KEY` examples only.
 - [x] Verify login/register/dashboard requests use UI server routes, not

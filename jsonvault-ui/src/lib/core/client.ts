@@ -7,6 +7,8 @@ import {
   validateCoreNameSegment,
 } from "./names";
 import type {
+  CreateDatabaseParams,
+  CreateDatabaseResult,
   CancelOperationResult,
   CoreDocument,
   CoreRequestOptions,
@@ -65,6 +67,28 @@ export class CoreClient {
 
   async getMe(): Promise<MeResponse> {
     return this.request<MeResponse>("/api/v1/me");
+  }
+  
+  async listDatabases(): Promise<string[]> {
+    const databases = await this.request<unknown>(`/api/v1/databases`, { cache: "no-store" });
+    return Array.isArray(databases)
+      ? databases.filter((db): db is string => typeof db === "string" && db.trim() !== "")
+      : [];
+  }
+
+  async createDatabase(params: CreateDatabaseParams): Promise<CreateDatabaseResult> {
+    validateCoreDatabaseName(params.name);
+    return this.request<CreateDatabaseResult>(`/api/v1/databases`, {
+      method: "POST",
+      body: { name: params.name },
+    });
+  }
+
+  async deleteDatabase(name: string): Promise<void> {
+    validateCoreDatabaseName(name);
+    await this.request<void>(`/api/v1/` + encodeURIComponent(name), {
+      method: "DELETE",
+    });
   }
 
   async listCollections(params: ListCollectionsParams): Promise<string[]> {
@@ -473,3 +497,5 @@ function readNumberHeader(response: Response, name: string): number {
   const value = Number.parseInt(response.headers.get(name) ?? "0", 10);
   return Number.isFinite(value) ? value : 0;
 }
+
+

@@ -147,5 +147,12 @@ function mapProjectCollectionCoreError(error: unknown, action: string): Error {
       `Project manager credentials cannot ${action}.`,
     );
   }
+  if (isCoreApiError(error) && error.status === 409) {
+    return new ProjectCollectionValidationError(error.message || "A conflict occurred.");
+  }
+  if (isCoreApiError(error) && error.status === 429) {
+    return new ProjectCollectionsUnavailableError("Rate limit exceeded. Please try again later.");
+  }
   return error instanceof Error ? error : new Error(String(error));
 }
+
