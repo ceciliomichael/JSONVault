@@ -1,39 +1,47 @@
 # JSONVault Core Engine
 
-Welcome to the engine room! `jsonvault-core` is the lightweight, fast, and secure Go-based NoSQL database server powering JSONVault. It exposes a simple REST API and supports real-time subscriptions, making it incredibly easy to store, query, and sync JSON documents.
+The `jsonvault-core` package is the foundational storage engine for the JSONVault platform. Written in Go, it is designed to be exceptionally lightweight, fast, and secure. The engine exposes a robust REST API for managing NoSQL document data and supports real-time synchronization out of the box.
 
-## Key Features
-- **Simple REST API**: Standard CRUD operations using JSON over HTTP.
-- **Real-Time Subscriptions**: Built-in Server-Sent Events (SSE) to stream changes to clients automatically.
-- **Ultra-Lightweight**: Designed to run efficiently with a minimal CPU and memory footprint (perfect for budget VPS environments).
-- **Secure**: Admin key plus scoped JWT access, optional fail-closed AES-GCM encryption at rest, and webhook SSRF protection.
+For a broader overview of the entire JSONVault architecture, please refer to the [Root Documentation](../README.md).
 
-## Getting Started
+## Capabilities
+
+- **RESTful API**: Intuitive and standard CRUD operations for JSON document management.
+- **Server-Sent Events (SSE)**: Native real-time streaming allows clients to subscribe to specific databases or collections and receive instant updates when data changes.
+- **Full-Text Search (FTS)**: Built-in indexing and search capabilities for rapid text queries.
+- **Atomic Transactions**: Support for multi-document operations to ensure that grouped data modifications succeed or fail together.
+- **Event Webhooks**: Automated, asynchronous outbound HTTP calls triggered by data mutations.
+- **Low Resource Footprint**: Optimized Go concurrency makes it suitable for budget VPS environments or high-density deployments.
+- **Security Architecture**: Enforces scoped JWT access control, prevents Server-Side Request Forgery (SSRF) on webhooks, and supports AES-GCM encryption at rest.
+
+## Installation & Setup
 
 ### Prerequisites
-- Go 1.21 or later installed.
+- Go 1.21 or later.
 
-### Quick Start
-1. **Clone & Setup**:
-   Copy the example environment file to `.env`:
+### Running the Server Locally
+
+1. **Configure the Environment**:
+   Copy the example environment configuration file.
    ```bash
    cp .env.example .env
    ```
 
-2. **Run the Server**:
-   Start the server locally:
+2. **Start the Engine**:
+   Execute the server entry point.
    ```bash
    go run ./cmd/jsonvault
    ```
-   By default, it will start listening on the port configured in your `.env` file (e.g. `:5766`).
+   The server will bind to the port specified in your `.env` file (e.g., `:5766`).
 
-3. **Run Tests**:
-   Ensure everything is working correctly by running the test suite:
+3. **Verify with Tests**:
+   Ensure the engine's integrity by running the test suite.
    ```bash
    go test ./... -v
    ```
 
-## Where to start?
-To integrate JSONVault into your apps or manage your deployment, check out the documentation in the root `docs/` folder:
-- **[Client Integration Guide](../docs/integration-guide.md):** Learn how to connect your application, read/write data, and subscribe to real-time events.
-- **[Operator Guide](../docs/operator-guide.md):** Learn how to configure settings, manage API keys, and host the database.
+## Next Steps
+
+Once the Core Engine is running, you can manage it visually by starting the [JSONVault UI Dashboard](../jsonvault-ui/README.md). 
+
+For detailed API usage instructions, refer to the [Client Integration Guide](../docs/integration-guide.md).

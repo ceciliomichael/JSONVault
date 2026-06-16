@@ -345,7 +345,7 @@ JSONVault supports ACID-compliant atomic transactions, allowing you to update mu
     ]
   }
   ```
-- **Response (200 OK):** An array of the resulting documents.
+- **Response (200 OK):** An object containing the array of resulting documents: `{"results": [...]}`
 
 ---
 
@@ -360,10 +360,10 @@ for event-driven architectures.
 When an event occurs, JSONVault will send a `POST` request to your URL containing the JSON payload.
 The request will include these headers:
 
-- `X-JSONVault-Signature`: Legacy HMAC SHA-256 hash of the payload using your `webhook_secret`.
+- `X-JSONVault-Signature`: Legacy HMAC SHA-256 hash of the payload using your `webhook_secret`, prefixed with `sha256=`.
 - `X-JSONVault-Timestamp`: Unix timestamp for replay-window checks.
 - `X-JSONVault-Event-ID`: Monotonic JSONVault event sequence ID.
-- `X-JSONVault-Signature-V2`: HMAC SHA-256 of `timestamp + "." + event_id + "." + payload` using your `webhook_secret`.
+- `X-JSONVault-Signature-V2`: HMAC SHA-256 of `timestamp + "." + event_id + "." + payload` using your `webhook_secret`, prefixed with `sha256=`.
 
 Receivers should verify `X-JSONVault-Signature-V2`, reject old timestamps, and deduplicate recent event IDs.
 
@@ -378,11 +378,13 @@ Discovery endpoints are optional. If your JWT is scoped to one known database
 or collection, these may return `403 Forbidden`; your app can use the known path
 directly.
 
+*(Note: Unlike core document endpoints, these discovery paths are absolute relative to the host root, NOT to `$JSONVAULT_API_URL`.)*
+
 #### Check Server Health
-- **Request:** `GET /healthz`
+- **Request:** `GET /healthz` (Host root)
 
 #### List Databases
-- **List:** `GET /api/v1/databases`
+- **List:** `GET /api/v1/databases` (Host root)
 - **Access:** Requires a token broad enough to list databases, usually
   `database: "*"` or admin.
 
@@ -398,7 +400,7 @@ your scoped key allows the target path.
 ---
 
 ## 🚨 4. Error Handling
-All errors follow a standard, predictable JSON format:
+Most core document errors follow a standard, predictable JSON format:
 ```json
 {
   "error": {
@@ -407,6 +409,7 @@ All errors follow a standard, predictable JSON format:
   }
 }
 ```
+*(Note: A few specific endpoints like presence, publish, and schema validation may return a simplified error format such as `{"error": "invalid payload"}`).*
 
 **Common Status Codes you might encounter:**
 - `400 Bad Request`: Invalid JSON, invalid filter literal, too many filters, offset too large, or schema validation failure.

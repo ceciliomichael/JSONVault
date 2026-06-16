@@ -1,22 +1,52 @@
 # JSONVault
 
-JSONVault is a fast, secure, and incredibly simple place to store your application's data. 
+JSONVault is a high-performance, self-hosted NoSQL JSON document database bundled with a modern developer dashboard. It is designed to simplify application data storage by allowing developers to store, retrieve, and observe data as natural JSON documents without the overhead of rigid SQL schemas.
 
-Think of it like a highly organized digital filing cabinet. Instead of dealing with complex spreadsheets, rigid tables, or writing complicated database queries, JSONVault lets your application save its data exactly as it naturally looks—as standard JSON documents. 
+## Architecture
 
-## What does it do?
-When you build an app (like a to-do list, a blog, or an e-commerce site), that app needs a brain to remember things. JSONVault acts as that brain. 
+The JSONVault project adopts a dual-component architecture to separate storage concerns from presentation and management. Please refer to the dedicated documentation for each component to learn more.
 
-- **Easy to Talk To:** It communicates over the internet using simple HTTP requests (the exact same language your web browser uses). Your app can say "Hey JSONVault, save this user profile," or "Hey JSONVault, give me all the tasks for today," and JSONVault instantly responds.
-- **Self-Organizing:** You don't need to spend hours setting up complex database schemas before you start coding. Just send your data. If a folder (we call them "Databases" and "Collections") doesn't exist yet, JSONVault creates it automatically on the fly.
-- **Incredibly Secure:** Out of the box, JSONVault encrypts all of your data. If someone were to steal the hard drive where JSONVault lives, your data would just look like scrambled gibberish without your secret encryption key.
-- **Protects Your Data:** It uses "Optimistic Concurrency Control". In plain English: if two users try to edit the exact same document at the exact same split-second, JSONVault ensures one doesn't accidentally overwrite the other's changes.
-- **Real-Time Magic:** It natively supports blazing-fast real-time subscriptions. If a document changes in the database, JSONVault instantly pushes the update to your frontend so your users see live updates without ever refreshing the page!
+1. **[JSONVault Core Engine](./jsonvault-core/README.md)**  
+   The core storage engine is built in Go. It provides the REST API, handles data persistence, enforces optimistic concurrency control, and broadcasts real-time Server-Sent Events (SSE). 
 
-## Who is this for?
-JSONVault is perfect for developers, startups, and hobbyists who want the power and speed of a professional database without the headaches of managing massive, complicated infrastructure like Postgres or MongoDB. It runs smoothly, requires almost zero maintenance, and just gets out of your way so you can focus on building your app.
+2. **[JSONVault UI Dashboard](./jsonvault-ui/README.md)**  
+   The developer dashboard is built with Next.js. It connects to the core engine and provides a graphical interface for exploring collections, running Full-Text Search queries, managing schemas, and monitoring webhooks.
 
-## Where to start?
-If you're a developer ready to plug your app into JSONVault, check out the documentation:
-- **[Client Integration Guide](./docs/integration-guide.md):** Learn how to connect your app, save data, and fetch it.
-- **[Server Guide](./docs/server-guide.md):** Learn how to host JSONVault, manage API keys, and configure the engine.
+## Core Capabilities
+
+- **Schema-less Organization**: JSONVault creates databases and collections dynamically. Simply send your JSON payloads, and the storage structures will automatically adapt.
+- **Real-Time Subscriptions**: Built-in Server-Sent Events (SSE) allow clients to subscribe to document changes. Updates are pushed instantly to connected clients without polling.
+- **Full-Text Search**: Native, optimized text search capabilities to query across large datasets efficiently.
+- **ACID-like Transactions**: Group multiple document creations, updates, or deletions into single atomic transactions to guarantee data integrity.
+- **Webhooks**: Configure outbound HTTP requests that trigger automatically when data changes occur within specific collections.
+- **Security at Rest**: Optional AES-GCM encryption ensures that underlying data files remain secure.
+
+## Getting Started
+
+To run the complete JSONVault stack locally, you will need to start both the Core Engine and the UI Dashboard.
+
+### Step 1: Start the Core Engine
+
+Navigate to the core directory and start the Go server. For detailed configuration options, see the [Core Engine Documentation](./jsonvault-core/README.md).
+
+```bash
+cd jsonvault-core
+cp .env.example .env
+go run ./cmd/jsonvault
+```
+
+### Step 2: Start the UI Dashboard
+
+In a new terminal window, navigate to the UI directory and start the Next.js development server. For further details, see the [UI Dashboard Documentation](./jsonvault-ui/README.md).
+
+```bash
+cd jsonvault-ui
+npm install
+npm run dev
+```
+
+Once both are running, open your browser and navigate to `http://localhost:3000` to access the developer dashboard.
+
+## Documentation
+
+For a comprehensive guide on integrating your application with JSONVault's API, please refer to the master [Integration Guide](./docs/integration-guide.md).

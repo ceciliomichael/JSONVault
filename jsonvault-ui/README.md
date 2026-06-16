@@ -1,36 +1,45 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# JSONVault UI Dashboard
 
-## Getting Started
+The `jsonvault-ui` package contains the official developer dashboard for JSONVault. Built on Next.js, it provides a comprehensive graphical interface to monitor, manage, and explore the data flowing through your database.
 
-First, run the development server:
+For a broader overview of the entire JSONVault architecture, please refer to the [Root Documentation](../README.md).
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Features
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- **Data Explorer**: A visual interface to browse, create, edit, and delete databases, collections, and individual JSON documents.
+- **Real-Time Testing**: Connect directly to Server-Sent Event (SSE) streams from the dashboard to observe real-time database mutations as they happen.
+- **Index and FTS Management**: Configure and deploy database schemas and Full-Text Search settings without writing raw API requests.
+- **Webhook Configuration**: Register and monitor external webhooks to trigger asynchronous workflows.
+- **Embedded Documentation**: Native, interactive access to all JSONVault integration guides and references, including an automated `llms.txt` export feature for AI assistants.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Installation & Setup
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Prerequisites
+- Node.js (v18 or later).
+- The [JSONVault Core Engine](../jsonvault-core/README.md) must be actively running to supply data to the UI.
 
-## Learn More
+### Running the Dashboard Locally
 
-To learn more about Next.js, take a look at the following resources:
+1. **Install Dependencies**:
+   ```bash
+   npm install
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+2. **Configure Environment Variables**:
+   Create a `.env.local` file in the root of `jsonvault-ui` to point the dashboard to your running core engine.
+   ```env
+   NEXT_PUBLIC_JSONVAULT_API_URL=http://localhost:5766
+   ```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+3. **Start the Development Server**:
+   ```bash
+   npm run dev
+   ```
 
-## Deploy on Vercel
+4. **Access the Application**:
+   Open your preferred web browser and navigate to `http://localhost:3000`.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Technology Stack
+- **Framework**: Next.js (App Router)
+- **Styling**: Tailwind CSS combined with Lucide React iconography.
+- **Content Rendering**: `next-mdx-remote` for serving dynamic, Markdown-driven documentation natively within the application.
