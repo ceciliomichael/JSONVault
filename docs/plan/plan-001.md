@@ -2,7 +2,7 @@
 
 Status: draft for user approval
 Created: 2026-06-07
-Updated: 2026-06-10
+Updated: 2026-06-11
 Target project: `jsonvault-ui`
 Core source of truth: `jsonvault-core`
 Reference docs:
@@ -31,64 +31,25 @@ Core-backed.
 ## Current Implementation Status
 
 - Execution mode: page-by-page vertical slices.
-- Current slice: indexes page Core-backed integration complete; awaiting
-  feedback before search/FTS page.
-- Last completed slice: indexes page lists, creates, and deletes
-  collection-scoped Core secondary indexes through server actions and the
-  selected project's server-only manager credential.
-- Next slice after current: search/FTS page.
-- Last verification: targeted Biome checks, `npx tsc --noEmit`, and
-  `npm run build` on 2026-06-09; JSONVault UI dev server verified at
-  `http://localhost:3000`; project deletion smoke-checked by rendering a Core
-  project card delete affordance after adding typed-name confirmation, deleting
-  a temporary Core `dashboard_projects` record, and verifying `404` after
-  delete; `/dashboard` redesigned in a Supabase-style project overview and
-  smoke-checked with a signed dashboard session selecting a temporary project
-  and a server-minted project manager token, including selected-project render,
-  primary database panel, get-connected section, project feature section,
-  `Collections` labels instead of `Tables`, no unsupported `Framework`, `MCP`,
-  `Advisor`, `Reports`, or `Total Requests` labels, no `Core request failed`,
-  no `resource not found`, no locked collections action, and cleanup;
-  `/dashboard/collections` smoke-checked with a signed dashboard session
-  selecting a temporary project, a real Core collection, and one document,
-  including collection render, document/API path columns, no empty state, no
-  Core request failure text, and cleanup of the temporary collection and
-  dashboard project record; `/dashboard/data` smoke-checked with a signed
-  dashboard session selecting a temporary project, a real Core collection, and
-  two real documents, including selected collection render, document/ETag
-  columns, create action, pagination total, no empty state, no Core request
-  failure text, and cleanup of the temporary collection and dashboard project
-  record; empty-state/cursor feedback smoke-checked with an empty selected
-  project on `/dashboard/collections` and `/dashboard/data`, including rendered
-  empty states, divider-based table bodies, global enabled-button pointer
-  cursor rule, no old row-border class, and cleanup of the temporary dashboard
-  project record; `/dashboard/keys` smoke-checked with a signed dashboard
-  session selecting a temporary project and real Core collection, including
-  selected database render, collection scope option, read/write and read-only
-  runtime key choices, one-time key warning, no fake key inventory, no
-  project-admin key option, no Core request failure text, and cleanup of the
-  temporary collection and dashboard project record; Core `POST /api/v1/admin/keys`
-  verified with the selected project's manager token by minting a real
-  `read_only` collection-scoped key; API keys feedback correction smoke-checked
-  restored toolbar/table empty state/side-panel trigger on `/dashboard/keys`,
-  including selected database render, collection option, no full-access key UI,
-  no fake persisted key inventory text, no Core request failure text, and
-  cleanup of the temporary collection and dashboard project record; API key
-  metadata inventory smoke-checked with temporary dashboard project/key metadata
-  records on `/dashboard/keys`, including stored five-character token prefix,
-  token ID, scope, database, collection, no old Core inventory disclaimer, no
-  full token in the rendered table, and cleanup of the temporary metadata,
-  project, and collection records; `/dashboard/schemas` smoke-checked with a
-  signed dashboard session selecting a temporary project, real Core collection,
-  and active Core schema, including selected database render, collection render,
-  saved schema badge, schema field/type render, validate/save actions, no mock
-  store output, and cleanup of the temporary schema, collection, and dashboard
-  project record; `/dashboard/indexes` smoke-checked with a signed dashboard
-  session selecting a temporary project, real Core collection, and active Core
-  secondary index, including selected database render, collection render, index
-  field render, ready state badge, create action, collection search, no mock
-  store output, no empty index state, and cleanup of the temporary index,
-  collection, and dashboard project record.
+- Current slice: plan cross-check against the current `jsonvault-ui` source.
+- Verified implemented in source: Core-backed auth/session, projects,
+  overview, collections, documents, API keys, schemas, indexes, FTS, webhooks,
+  operations, realtime, and docs pages are present and route through server
+  actions/pages plus the server-side Core client.
+- Remaining gaps found by the 2026-06-11 source audit:
+  - no UI unit test files or `test` script exist for Core client behavior;
+  - no typed Core database management helper is present, although project
+    creation relies on dashboard metadata and Core lazy database creation;
+  - status-specific Core error mapping is not complete for every listed status,
+    especially `409` and `429`;
+  - `src/lib/constants.ts` still exports stale `DASHBOARD_PREVIEW_MODE = true`;
+  - dashboard sessions still fall back to `JSONVAULT_JWT_SECRET` when
+    `JSONVAULT_DASHBOARD_SESSION_SECRET` is absent;
+  - static client chunks contain placeholder `JSONVAULT_API_KEY` examples in
+    docs/connect UI; actual secret values were not found, but full browser
+    response auditing remains open.
+- Last verification: source cross-check on 2026-06-11 plus focused Biome
+  checks, `npx tsc --noEmit`, and `npm run build`.
 
 Update this section after each completed slice so the current phase, completed
 work, next page, and verification status remain visible.
@@ -216,13 +177,16 @@ None of these values should be exposed through `NEXT_PUBLIC_*`.
 Evidence from the current worktree:
 
 - `jsonvault-ui/.env.example` declares `JSONVAULT_API_BASE_URL`,
-  `JSONVAULT_JWT_SECRET`, `JSONVAULT_API_KEY`, and dashboard auth storage names.
-- `jsonvault-ui/src/app/layout.tsx` still wraps the app in
-  `DashboardMockProvider`.
-- Several dashboard subpages still call `useDashboardMock()`. The foundation,
-  login/register/logout, projects page, dashboard shell, and dashboard overview
-  now consume real server-side Core/session/project state.
-- `jsonvault-ui/src/lib/constants.ts` has `DASHBOARD_PREVIEW_MODE = true`.
+  `JSONVAULT_JWT_SECRET`, `JSONVAULT_DASHBOARD_SESSION_SECRET`,
+  `JSONVAULT_API_KEY`, and dashboard auth/projects/API-key storage names.
+- `jsonvault-ui/src/app/layout.tsx` no longer wraps the app in
+  `DashboardMockProvider`; source search finds no `useDashboardMock()` calls.
+- `jsonvault-ui/src/lib/constants.ts` still has stale
+  `DASHBOARD_PREVIEW_MODE = true`, but no mock store/provider files are present.
+- Dashboard subpages now consume real server-side Core/session/project state
+  through pages, server actions, services, and `createProjectCoreClient()`.
+- No `src/**/*.test.ts(x)` or `src/**/*.spec.ts(x)` files were found in
+  `jsonvault-ui`, and `package.json` has no `test` script.
 - Core requires `JSONVAULT_ADMIN_KEY` and `JSONVAULT_JWT_SECRET`.
 - Core accepts all runtime/API requests through `Authorization: Bearer <token>`
   except `/healthz`.
@@ -535,8 +499,9 @@ foundation should stay thin and grow as each page needs real Core behavior.
 - [x] **Operations page**: list/cancel permitted Core operations.
 - [x] **Realtime page**: connect to real SSE/presence/publish behavior through a
       safe auth boundary.
-- [ ] **Docs and cleanup**: env examples, setup docs, mock-mode cleanup, and
-      final full-flow verification.
+- [x] **Docs page**: MDX docs route and dashboard overview docs link.
+- [ ] **Cleanup/final verification**: remove stale preview flags, add missing
+      tests, and complete final full-flow verification evidence.
 
 The detailed checklists below remain the responsibility map, but execution
 follows the page slice order above.
@@ -566,18 +531,22 @@ follows the page slice order above.
 - [x] Add typed helper for document creation.
 - [x] Add typed helpers for collections, document updates/deletes, schemas,
       indexes, and admin key creation where permitted.
-- [ ] Add typed helpers for databases, FTS, webhooks, and operations.
+- [x] Add typed helpers for FTS, webhooks, operations, presence, and publish.
+- [ ] Add typed Core database management helpers if explicit database
+      management is required beyond Core lazy creation.
 - [ ] Add tests for URL joining, auth headers, JSON serialization, ETag
       extraction, pagination headers, and Core error parsing.
 
 ### Phase 2: Dashboard Server API Boundary
 
-- [ ] Add UI route handlers/server actions that call the Core client.
-- [ ] Keep all Core secrets inside server-only modules.
-- [ ] Return sanitized data to browser components.
-- [ ] Map Core `401`, `403`, `404`, `409`, `412`, `422`, and `429` into
-      dashboard-safe error messages.
-- [ ] Add cache/no-store behavior where data must be fresh.
+- [x] Add UI route handlers/server actions that call the Core client.
+- [x] Keep all Core secrets inside server-only modules.
+- [x] Return sanitized data to browser components.
+- [x] Map common Core `401`, `403`, `404`, `412`, and `422` failures into
+      dashboard-safe error messages where current slices need them.
+- [ ] Add complete status-specific mapping for `409` and `429` across all
+      dashboard slices.
+- [x] Add cache/no-store behavior where data must be fresh.
 
 ### Phase 3: Dashboard Auth On Core
 
@@ -587,8 +556,9 @@ follows the page slice order above.
 - [x] Hash passwords server-side.
 - [x] Store dashboard session in an HTTP-only cookie.
 - [x] Add logout.
-- [ ] Keep login/register free of root admin key, JWT secret, and server setup
-      prompts.
+- [ ] Remove the dashboard session fallback to `JSONVAULT_JWT_SECRET`; sessions
+      should require or use `JSONVAULT_DASHBOARD_SESSION_SECRET` without Core
+      JWT secret coupling.
 
 ### Phase 4: Projects On Core
 
@@ -605,23 +575,25 @@ follows the page slice order above.
 - [x] Prefer Core lazy creation where it is enough; use explicit Core
       database/collection endpoints only when the token has the required
       capability and the workflow needs explicit provisioning.
-- [ ] Selecting a project should set the active Core database for the existing
+- [x] Selecting a project should set the active Core database for the existing
       dashboard pages.
 - [x] Keep the existing Projects page UI; only replace mock data/actions with
       real server-backed data/actions.
 
 ### Phase 5: Replace Mock Store Incrementally
 
-- [ ] Keep the mock store only behind an explicit preview/development mode.
-- [ ] Build a real data adapter with a similar shape to the current dashboard
+- [ ] Remove or explicitly gate the stale `DASHBOARD_PREVIEW_MODE = true`
+      constant.
+- [x] Build a real data adapter with a similar shape to the current dashboard
       store so pages can migrate incrementally.
-- [ ] Start with low-risk reads:
+- [x] Start with low-risk reads:
       `GET /api/v1/me`,
-      `GET /api/v1/databases`,
       `GET /api/v1/{database}/collections`.
-- [ ] Then wire document list/read/create/edit/delete.
-- [ ] Then wire collection create/delete.
-- [ ] Then wire Indexes, Search, Schemas, Webhooks, Operations, Realtime, and
+- [ ] Add `GET /api/v1/databases` wiring only if the dashboard needs explicit
+      Core database listing.
+- [x] Then wire document list/read/create/edit/delete.
+- [x] Then wire collection create/delete.
+- [x] Then wire Indexes, Search, Schemas, Webhooks, Operations, Realtime, and
       API Keys.
 
 ### Phase 6: API Keys Page
@@ -639,7 +611,7 @@ follows the page slice order above.
 - [x] Show generated token once with copy action.
 - [x] Store/display token ID, scope, database, collection, capabilities, and
       expiration without keeping the full token visible.
-- [ ] Do not show `JSONVAULT_JWT_SECRET`.
+- [x] Do not show `JSONVAULT_JWT_SECRET`.
 
 ### Phase 7: Realtime
 
@@ -666,11 +638,13 @@ follows the page slice order above.
       `jsonvault-core` instance.
 - [x] Collect user feedback after each completed slice before implementing the
       next slice.
-- [x] Run relevant unit tests for the Core client.
+- [ ] Run relevant unit tests for the Core client.
 - [x] Run `npm run build`.
 - [x] Run targeted Biome checks for touched files.
 - [x] Test with a local `jsonvault-core` instance.
-- [x] Verify secrets are absent from client bundles and browser responses.
+- [ ] Verify actual secret values are absent from client bundles and browser
+      responses; current static bundle scan found placeholder
+      `JSONVAULT_API_KEY` examples only.
 - [x] Verify login/register/dashboard requests use UI server routes, not
       browser-exposed Core secrets.
 - [x] Verify permission-denied states from real `GET /api/v1/me` capabilities.

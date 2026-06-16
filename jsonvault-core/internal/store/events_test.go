@@ -58,6 +58,30 @@ func TestPublishEventAssignsMonotonicSequences(t *testing.T) {
 	}
 }
 
+func TestPublishEventLeavesTransientEventsSequenceLess(t *testing.T) {
+	db := &Store{}
+	sub := db.Subscribe("testdb", "events")
+	defer db.Unsubscribe(sub)
+
+	db.PublishEvent(Event{Action: "publish", Database: "testdb", Collection: "events", DocumentID: "a"})
+	db.PublishEvent(Event{Action: "presence_update", Database: "testdb", Collection: "events", DocumentID: "client_1"})
+	db.PublishEvent(Event{Action: "insert", Database: "testdb", Collection: "events", DocumentID: "b"})
+
+	published := <-sub.Ch
+	presence := <-sub.Ch
+	durable := <-sub.Ch
+
+	if published.Sequence != 0 {
+		t.Fatalf("publish sequence = %d, want 0", published.Sequence)
+	}
+	if presence.Sequence != 0 {
+		t.Fatalf("presence sequence = %d, want 0", presence.Sequence)
+	}
+	if durable.Sequence == 0 {
+		t.Fatal("durable insert sequence = 0, want non-zero")
+	}
+}
+
 func TestWebhookQueueIsBounded(t *testing.T) {
 	s := &Store{
 		webhookQueue: make(chan Event, 1),
@@ -69,6 +93,19 @@ func TestWebhookQueueIsBounded(t *testing.T) {
 
 	if queued := len(s.webhookQueue); queued != 1 {
 		t.Fatalf("queued events = %d, want bounded queue length 1", queued)
+	}
+}
+
+func TestPresenceEventsDoNotEnterWebhookQueue(t *testing.T) {
+	s := &Store{
+		webhookQueue: make(chan Event, 1),
+		webhookStop:  make(chan struct{}),
+	}
+
+	s.enqueueWebhook(Event{Action: "presence_update", Database: "testdb", Collection: "events", DocumentID: "client_1"})
+
+	if queued := len(s.webhookQueue); queued != 0 {
+		t.Fatalf("queued events = %d, want 0", queued)
 	}
 }
 

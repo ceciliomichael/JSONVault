@@ -3,17 +3,18 @@ package store
 import (
 	stdjson "encoding/json"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
 
 // Event represents a database mutation to be broadcast to subscribers.
 type Event struct {
-	Sequence   uint64          `json:"sequence,omitempty"`
-	Action     string          `json:"action"` // "insert", "update", "delete"
-	Database   string          `json:"database"`
-	Collection string          `json:"collection"`
-	DocumentID string          `json:"document_id"`
+	Sequence   uint64             `json:"sequence,omitempty"`
+	Action     string             `json:"action"` // "insert", "update", "delete"
+	Database   string             `json:"database"`
+	Collection string             `json:"collection"`
+	DocumentID string             `json:"document_id"`
 	ETag       string             `json:"etag,omitempty"`     // The new ETag
 	Document   stdjson.RawMessage `json:"document,omitempty"` // Included for inserts/updates
 }
@@ -24,6 +25,12 @@ type PresenceEntry struct {
 	Metadata  stdjson.RawMessage `json:"metadata,omitempty"`
 	JoinedAt  time.Time          `json:"joined_at"`
 	ExpiresAt time.Time          `json:"expires_at"`
+}
+
+type PresenceHeartbeatResult struct {
+	Joined  bool
+	Updated bool
+	Entry   PresenceEntry
 }
 
 type Subscription struct {
@@ -109,7 +116,7 @@ func (s *Store) GetSubscriberCount(database, collection string) int {
 
 // PublishEvent broadcasts an event to all active subscribers for that collection.
 func (s *Store) PublishEvent(event Event) {
-	if event.Sequence == 0 {
+	if event.Sequence == 0 && shouldAssignEventSequence(event.Action) {
 		event.Sequence = s.eventSeq.Add(1)
 	}
 
@@ -150,8 +157,19 @@ func (s *Store) PublishEvent(event Event) {
 	}
 }
 
+func shouldAssignEventSequence(action string) bool {
+	return action != "publish" && !isPresenceEventAction(action)
+}
+
+func isPresenceEventAction(action string) bool {
+	return strings.HasPrefix(action, "presence_")
+}
+
 func (s *Store) enqueueWebhook(event Event) {
 	if s.webhookQueue == nil {
+		return
+	}
+	if isPresenceEventAction(event.Action) {
 		return
 	}
 	select {

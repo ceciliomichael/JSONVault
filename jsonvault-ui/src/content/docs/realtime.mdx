@@ -1,0 +1,71 @@
+# Real-Time Subscriptions
+
+### Stream Collection Updates
+Open a persistent HTTP connection to receive live document mutations.
+- **Request:** `GET /{collection}/subscribe`
+- **Response:** Infinite stream of `text/event-stream`
+- **Event Format:**
+  ```text
+  data: {"sequence":1,"action":"insert","database":"{db}","collection":"{coll}","document_id":"<id>","etag":"<new_etag>","document":{...}}
+  id: 1
+  
+  data: {"sequence":2,"action":"update","database":"{db}","collection":"{coll}","document_id":"<id>","etag":"<new_etag>","document":{...}}
+  id: 2
+  
+  data: {"sequence":3,"action":"delete","database":"{db}","collection":"{coll}","document_id":"<id>"}
+  id: 3
+  ```
+
+> [!WARNING]
+> **The Delete Quirk:** Notice that the `delete` action payload completely omits the `document` object. When parsing SSE events, always rely on `event.document_id` to identify the document that was deleted, otherwise your application will crash trying to read `event.document.id`.
+
+Use the standard `Last-Event-ID` header, or `?last_event_id=<sequence>`, to replay retained committed document events after reconnecting. Transient `publish` messages are not stored and cannot be replayed.
+
+*(Note: To prevent proxies from dropping idle connections, JSONVault sends a silent `: keepalive` comment every 15 seconds. Standard EventSource clients handle this automatically. If a subscriber falls behind, JSONVault closes the stream; clients should reconnect with the last event ID.)*
+
+### Publish Transient Message (Pub/Sub)
+Instantly broadcast a JSON message to all active SSE subscribers without saving it to the database disk. Perfect for ephemeral events like "User is typing...".
+- **Request:** `POST /{collection}/publish`
+- **Body:** Any valid JSON object (Max 100KB).
+- **Response (202 Accepted):** `{"published": true, "database": "...", "collection": "..."}`
+
+### Real-Time Presence
+JSONVault features a native, heartbeat-driven presence system for tracking online users. Presence is decoupled from SSE connections, meaning multiple tabs from the same user count as a single active session.
+
+**1. Join Presence (Heartbeat)**
+To join presence, clients send a `POST /heartbeat` request. This must be repeated every 15 seconds to keep the session alive.
+- **Request:** `POST /{collection}/heartbeat`
+- **Body:** `{"client_id": "user_123", "metadata": {"name": "Alice"}}` (metadata is optional)
+- **Response (200 OK):** `{"ok": true}`
+
+**2. Leave Presence Gracefully**
+When a user navigates away, you can use `navigator.sendBeacon` to instantly evict them from the presence list.
+- **Request:** `DELETE /{collection}/heartbeat`
+- **Body:** `{"client_id": "user_123"}`
+- **Response (200 OK):** `{"ok": true}`
+*(Note: If a client crashes or loses connection without sending a leave request, they are automatically evicted after 30 seconds).*
+
+**3. Get Active Clients**
+Retrieve the current list of online clients and their metadata.
+- **Request:** `GET /{collection}/presence`
+- **Response (200 OK):** 
+```json
+{
+  "database": "my_app", 
+  "collection": "users", 
+  "count": 1,
+  "clients": [
+    {"client_id": "user_123", "metadata": {"name": "Alice"}, "joined_at": "...", "expires_at": "..."}
+  ]
+}
+```
+
+> [!TIP]
+> **Listen for Presence Events:**
+> When you subscribe to a collection (`GET /{collection}/subscribe`), you will automatically receive `presence_join` and `presence_leave` SSE events when clients heartbeat for the first time or leave/expire. 
+> 
+> **Best Practice:** Do **not** use `+1` or `-1` to increment your local counter when receiving these events. Deltas are extremely fragile against dropped connections or race conditions during page reloads. Instead, treat these events as a signal to **re-fetch** the authoritative count from `GET /{collection}/presence`.
+
+> [!WARNING]
+> **Beware of Fetch Caching:**
+> If you proxy the `/presence` or SSE endpoints through a backend (like Next.js API Routes), ensure you pass `{ cache: 'no-store' }` to your upstream `fetch`. Otherwise, Next.js will aggressively cache the initial `GET /presence` request permanently, leaving your UI completely out of sync! For SSE connections, ensure you pass the request abort signal (`signal: request.signal`) so idle upstream connections are properly closed when the browser navigates away.

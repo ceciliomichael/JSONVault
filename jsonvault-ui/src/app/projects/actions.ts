@@ -97,10 +97,7 @@ export async function deleteProjectAction(formData: FormData): Promise<void> {
   redirect("/projects");
 }
 
-function fail(
-  message: string,
-  displayName: string,
-): ProjectActionState {
+function fail(message: string, displayName: string): ProjectActionState {
   return {
     status: "error",
     message,

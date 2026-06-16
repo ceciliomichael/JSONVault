@@ -2,7 +2,7 @@
 
 import { AlertTriangle, Plus, RefreshCw, Search, Webhook } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   Badge,
   CheckboxControl,
@@ -57,6 +57,12 @@ export default function WebhooksClient({
 
   const [tab, setTab] = useState<"targets" | "deliveries">("targets");
   const [showAdd, setShowAdd] = useState(false);
+  const [webhookRows, setWebhookRows] = useState(webhooks);
+
+  useEffect(() => {
+    setWebhookRows(webhooks);
+  }, [webhooks]);
+
   const [newUrl, setNewUrl] = useState("");
   const [newEvents, setNewEvents] = useState<string[]>([
     "insert",
@@ -85,15 +91,15 @@ export default function WebhooksClient({
 
   const visibleTargets = useMemo(() => {
     const query = targetSearch.trim().toLowerCase();
-    if (!query) return webhooks;
-    return webhooks.filter(
+    if (!query) return webhookRows;
+    return webhookRows.filter(
       (target) =>
         target.url.toLowerCase().includes(query) ||
         target.events.some((eventName) =>
           eventName.toLowerCase().includes(query),
         ),
     );
-  }, [webhooks, targetSearch]);
+  }, [webhookRows, targetSearch]);
 
   const visibleTargetUrls = visibleTargets.map((target) => target.url);
   const allVisibleTargetsSelected =
@@ -138,7 +144,7 @@ export default function WebhooksClient({
     setSaveConfirm(false);
     startTransition(async () => {
       // Append the new target to existing targets
-      const nextWebhooks = [...webhooks, { url: newUrl, events: newEvents }];
+      const nextWebhooks = [...webhookRows, { url: newUrl, events: newEvents }];
 
       const result = await saveWebhooksAction(
         projectId,
@@ -148,6 +154,7 @@ export default function WebhooksClient({
       );
 
       if (result.success) {
+        setWebhookRows(nextWebhooks);
         setNotice({ status: "success", message: result.message });
         setSecret(result.webhookSecret ?? "");
         setNewUrl("");
@@ -170,7 +177,7 @@ export default function WebhooksClient({
 
     startTransition(async () => {
       const urlsToRemove = new Set(targetRemoveUrls);
-      const nextWebhooks = webhooks.filter((w) => !urlsToRemove.has(w.url));
+      const nextWebhooks = webhookRows.filter((w) => !urlsToRemove.has(w.url));
 
       const result = await saveWebhooksAction(
         projectId,
@@ -180,6 +187,7 @@ export default function WebhooksClient({
       );
 
       if (result.success) {
+        setWebhookRows(nextWebhooks);
         setNotice({
           status: "success",
           message:
@@ -392,7 +400,7 @@ export default function WebhooksClient({
                   <tbody
                     className={`divide-y divide-zinc-100 dark:divide-white/5 ${visibleTargets.length > 0 ? "border-b border-zinc-100 dark:border-white/5" : ""}`}
                   >
-                    {webhooks.length === 0 ? (
+                    {webhookRows.length === 0 ? (
                       <tr>
                         <td colSpan={3}>
                           <EmptyState

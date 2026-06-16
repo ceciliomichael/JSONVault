@@ -6,9 +6,9 @@ import {
   CircleHelp,
   Database,
   Lightbulb,
+  Plug,
   Search,
   Table2,
-  Plug,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
@@ -255,11 +255,11 @@ export default function Topbar({
         <ProfileMenu userEmail={userEmail} userName={userName} />
       </div>
 
-      <ConnectPanel 
-        database={selectedDb} 
-        isOpen={isConnectOpen} 
+      <ConnectPanel
+        database={selectedDb}
+        isOpen={isConnectOpen}
         apiUrl={apiUrl}
-        onClose={() => setIsConnectOpen(false)} 
+        onClose={() => setIsConnectOpen(false)}
       />
     </header>
   );

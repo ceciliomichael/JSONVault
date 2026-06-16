@@ -1,0 +1,17 @@
+# Atomic Transactions
+
+JSONVault supports ACID-compliant atomic transactions, allowing you to update multiple documents at exactly the same time. If any single operation fails (e.g. invalid JSON, missing ETag), the entire transaction rolls back.
+
+- **Request:** `POST /transactions`
+- **Limits:** Maximum 100 operations and 4MB cumulative operation body bytes.
+- **Body:**
+  ```json
+  {
+    "operations": [
+      { "action": "put", "collection": "users", "id": "1", "body": {"balance": 90}, "expected_etag": "hash123" },
+      { "action": "put", "collection": "users", "id": "2", "body": {"balance": 110}, "expected_etag": "hash456" },
+      { "action": "delete", "collection": "orders", "id": "xyz" }
+    ]
+  }
+  ```
+- **Response (200 OK):** An array of the resulting documents.

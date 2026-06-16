@@ -59,27 +59,48 @@ export async function deleteIndexesAction(
     return { status: "error", message: "Choose at least one index to delete." };
   }
 
-  try {
-    const deletedFields: string[] = [];
-    for (const field of normalizedFields) {
-      deletedFields.push(
-        await deleteProjectIndex(project.database, collection, field, client),
-      );
+  const deletedFields: string[] = [];
+  let firstError: unknown = null;
+
+  const results = await Promise.allSettled(
+    normalizedFields.map(async (field) => {
+      try {
+        const deletedField = await deleteProjectIndex(
+          project.database,
+          collection,
+          field,
+          client,
+        );
+        return { status: "deleted" as const, field: deletedField };
+      } catch (error) {
+        throw error;
+      }
+    }),
+  );
+
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      deletedFields.push(result.value.field);
+    } else if (!firstError) {
+      firstError = result.reason;
     }
-    return {
-      status: "success",
-      message:
-        deletedFields.length === 1
-          ? `Deleted index on ${deletedFields[0]}.`
-          : `Deleted ${deletedFields.length} indexes.`,
-      deletedFields,
-    };
-  } catch (error) {
+  }
+
+  if (firstError && deletedFields.length === 0) {
     return handleIndexActionError(
-      error,
+      firstError,
       "Could not delete the selected indexes.",
     );
   }
+
+  return {
+    status: "success",
+    message:
+      deletedFields.length === 1
+        ? `Deleted index on ${deletedFields[0]}.`
+        : `Deleted ${deletedFields.length} indexes.`,
+    deletedFields,
+  };
 }
 
 async function requireSelectedProject(): Promise<DashboardProject> {

@@ -60,8 +60,8 @@ type Store interface {
 	PublishEvent(event store.Event)
 	GetSubscriberCount(database, collection string) int
 
-	Heartbeat(database, collection, clientID string, metadata stdjson.RawMessage, ttl time.Duration) (bool, error)
-	LeavePresence(database, collection, clientID string) bool
+	Heartbeat(database, collection, clientID string, metadata stdjson.RawMessage, ttl time.Duration) (store.PresenceHeartbeatResult, error)
+	LeavePresence(database, collection, clientID string) (store.PresenceEntry, bool)
 	ListPresence(database, collection string) []store.PresenceEntry
 }
 

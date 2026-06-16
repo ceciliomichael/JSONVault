@@ -60,29 +60,44 @@ export async function deleteCollectionsAction(
   const client = createProjectCoreClient(project.database);
   const deleted: string[] = [];
   const missing: string[] = [];
+  let firstError: unknown = null;
 
-  for (const name of names) {
-    try {
-      const result = await deleteProjectCollection(
-        project.database,
-        name,
-        client,
-      );
-      deleted.push(result.name);
-    } catch (error) {
-      if (error instanceof ProjectCollectionNotFoundError) {
-        missing.push(name);
-        continue;
+  const results = await Promise.allSettled(
+    names.map(async (name) => {
+      try {
+        const result = await deleteProjectCollection(
+          project.database,
+          name,
+          client,
+        );
+        return { status: "deleted" as const, name: result.name };
+      } catch (error) {
+        if (error instanceof ProjectCollectionNotFoundError) {
+          return { status: "missing" as const, name };
+        }
+        throw error;
       }
-      if (deleted.length > 0) {
-        revalidateCollections();
+    }),
+  );
+
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      if (result.value.status === "deleted") {
+        deleted.push(result.value.name);
+      } else {
+        missing.push(result.value.name);
       }
-      return handleCollectionMutationError(error, "delete collection");
+    } else if (!firstError) {
+      firstError = result.reason;
     }
   }
 
   if (deleted.length > 0) {
     revalidateCollections();
+  }
+
+  if (firstError && deleted.length === 0) {
+    return handleCollectionMutationError(firstError, "delete collection");
   }
 
   if (deleted.length === 0 && missing.length > 0) {

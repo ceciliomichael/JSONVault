@@ -60,6 +60,8 @@ type Store struct {
 
 	presenceMu      sync.RWMutex
 	presenceEntries map[string]map[string]map[string]*PresenceEntry
+	presenceCancel  context.CancelFunc
+	presenceWG      sync.WaitGroup
 }
 
 type Document struct {
@@ -171,6 +173,7 @@ func NewWithOptions(root string, cacheEntries int, encryptionKey []byte, options
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
 	options = normalizeOptions(absRoot, options)
+	presenceCtx, presenceCancel := context.WithCancel(context.Background())
 	s := &Store{
 		root:               absRoot,
 		cacheEntries:       cacheEntries,
@@ -192,24 +195,20 @@ func NewWithOptions(root string, cacheEntries int, encryptionKey []byte, options
 		webhookQueue:       make(chan Event, 1024),
 		webhookLimiter:     newWebhookTargetLimiter(2),
 		webhookStop:        make(chan struct{}),
+		presenceCancel:     presenceCancel,
 	}
 	for i := 0; i < 4; i++ {
 		s.webhookWG.Add(1)
 		go s.webhookWorker()
 	}
 
-	// We'll pass a context to the eviction worker that we can cancel on close
-	// For simplicity, we just use context.Background() since the Store doesn't have a top-level context.
-	// But it's better to manage it. We'll just run it.
-	go s.StartPresenceEvictionWorker(context.Background(), func(db, collection, clientID string) {
-		s.PublishEvent(Event{
-			Action:     "presence_leave",
-			Database:   db,
-			Collection: collection,
-			DocumentID: clientID,
-			Document:   stdjson.RawMessage(`{"client_id": "` + clientID + `"}`),
+	s.presenceWG.Add(1)
+	go func() {
+		defer s.presenceWG.Done()
+		s.StartPresenceEvictionWorker(presenceCtx, func(db, collection string, entry PresenceEntry) {
+			s.PublishEvent(NewPresenceEvent("presence_leave", db, collection, entry))
 		})
-	})
+	}()
 
 	return s, nil
 }
@@ -379,6 +378,11 @@ func (s *Store) purgeExpiredDocuments() error {
 }
 
 func (s *Store) Close() error {
+	if s.presenceCancel != nil {
+		s.presenceCancel()
+		s.presenceWG.Wait()
+	}
+
 	s.webhookStopOnce.Do(func() {
 		close(s.webhookStop)
 	})

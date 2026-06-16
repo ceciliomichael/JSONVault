@@ -1,0 +1,22 @@
+# Outbound Webhook Delivery
+
+If your host/operator configured webhooks for your collection, JSONVault can
+send an HTTP POST request to your backend whenever data changes. This is useful
+for event-driven architectures.
+
+*Note: JSONVault features strict SSRF protection and will block webhooks to internal or private IP addresses. Redirects are disabled, and deliveries are processed through bounded workers with per-target limits.*
+
+### Webhook Delivery
+
+When an event occurs, JSONVault will send a `POST` request to your URL containing the JSON payload.
+The request will include these headers:
+
+- `X-JSONVault-Signature`: Legacy HMAC SHA-256 hash of the payload using your `webhook_secret`.
+- `X-JSONVault-Timestamp`: Unix timestamp for replay-window checks.
+- `X-JSONVault-Event-ID`: Monotonic JSONVault event sequence ID.
+- `X-JSONVault-Signature-V2`: HMAC SHA-256 of `timestamp + "." + event_id + "." + payload` using your `webhook_secret`.
+
+Receivers should verify `X-JSONVault-Signature-V2`, reject old timestamps, and deduplicate recent event IDs.
+
+Webhook registration, delivery inspection, and manual retry require
+`webhooks:manage` or an admin key.

@@ -1,6 +1,14 @@
 "use client";
 
-import { Check, ChevronDown, Copy, ExternalLink, KeyRound, Link2, Plug } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Copy,
+  ExternalLink,
+  KeyRound,
+  Link2,
+  Plug,
+} from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ConnectPanel } from "@/components/ConnectPanel";

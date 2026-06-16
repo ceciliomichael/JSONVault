@@ -55,6 +55,10 @@ func (s *Server) handleSubscribe(c *gin.Context) {
 		}
 	}
 
+	if !writeSSEEvent(c, rc, s.presenceStateEvent(database, collection)) {
+		return
+	}
+
 	// Keep-Alive Ticker: Prevents reverse proxies (Nginx/Cloudflare) from severing idle streams.
 	keepalive := time.NewTicker(5 * time.Second)
 	defer keepalive.Stop()
@@ -80,13 +84,15 @@ func (s *Server) handleSubscribe(c *gin.Context) {
 			if !ok {
 				return
 			}
-			if event.Sequence <= lastSent {
+			if event.Sequence > 0 && event.Sequence <= lastSent {
 				continue
 			}
 			if !writeSSEEvent(c, rc, event) {
 				return
 			}
-			lastSent = event.Sequence
+			if event.Sequence > lastSent {
+				lastSent = event.Sequence
+			}
 		}
 	}
 }
@@ -123,6 +129,27 @@ func writeSSEEvent(c *gin.Context, rc *http.ResponseController, event store.Even
 		return false
 	}
 	return rc.Flush() == nil
+}
+
+func (s *Server) presenceStateEvent(database, collection string) store.Event {
+	clients := s.store.ListPresence(database, collection)
+	if clients == nil {
+		clients = []store.PresenceEntry{}
+	}
+	document, _ := json.Marshal(gin.H{
+		"database":   database,
+		"collection": collection,
+		"count":      len(clients),
+		"clients":    clients,
+		"state":      presenceState(clients),
+	})
+	return store.Event{
+		Action:     "presence_state",
+		Database:   database,
+		Collection: collection,
+		DocumentID: "presence",
+		Document:   document,
+	}
 }
 
 func (s *Server) handlePublish(c *gin.Context) {

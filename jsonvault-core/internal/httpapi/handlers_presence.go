@@ -43,27 +43,25 @@ func (s *Server) handleHeartbeat(c *gin.Context) {
 		return
 	}
 
-	isNew, err := s.store.Heartbeat(database, collection, req.ClientID, req.Metadata, 30*time.Second)
+	result, err := s.store.Heartbeat(database, collection, req.ClientID, req.Metadata, 30*time.Second)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	if isNew {
-		docJSON, _ := json.Marshal(map[string]any{
-			"client_id": req.ClientID,
-			"metadata":  req.Metadata,
-		})
-		s.store.PublishEvent(store.Event{
-			Action:     "presence_join",
-			Database:   database,
-			Collection: collection,
-			DocumentID: req.ClientID,
-			Document:   docJSON,
-		})
+	switch {
+	case result.Joined:
+		s.store.PublishEvent(store.NewPresenceEvent("presence_join", database, collection, result.Entry))
+	case result.Updated:
+		s.store.PublishEvent(store.NewPresenceEvent("presence_update", database, collection, result.Entry))
 	}
 
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	c.JSON(http.StatusOK, gin.H{
+		"ok":         true,
+		"joined":     result.Joined,
+		"updated":    result.Updated,
+		"expires_at": result.Entry.ExpiresAt,
+	})
 }
 
 func (s *Server) handleLeavePresence(c *gin.Context) {
@@ -86,21 +84,12 @@ func (s *Server) handleLeavePresence(c *gin.Context) {
 		return
 	}
 
-	found := s.store.LeavePresence(database, collection, req.ClientID)
+	entry, found := s.store.LeavePresence(database, collection, req.ClientID)
 	if found {
-		docJSON, _ := json.Marshal(map[string]any{
-			"client_id": req.ClientID,
-		})
-		s.store.PublishEvent(store.Event{
-			Action:     "presence_leave",
-			Database:   database,
-			Collection: collection,
-			DocumentID: req.ClientID,
-			Document:   docJSON,
-		})
+		s.store.PublishEvent(store.NewPresenceEvent("presence_leave", database, collection, entry))
 	}
 
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	c.JSON(http.StatusOK, gin.H{"ok": true, "left": found})
 }
 
 func (s *Server) handlePresence(c *gin.Context) {
@@ -122,5 +111,14 @@ func (s *Server) handlePresence(c *gin.Context) {
 		"collection": collection,
 		"count":      len(clients),
 		"clients":    clients,
+		"state":      presenceState(clients),
 	})
+}
+
+func presenceState(clients []store.PresenceEntry) map[string][]store.PresenceEntry {
+	state := make(map[string][]store.PresenceEntry, len(clients))
+	for _, client := range clients {
+		state[client.ClientID] = append(state[client.ClientID], client)
+	}
+	return state
 }

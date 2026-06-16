@@ -1,0 +1,22 @@
+# Discovery Endpoints
+
+Discovery endpoints are optional. If your JWT is scoped to one known database
+or collection, these may return `403 Forbidden`; your app can use the known path
+directly.
+
+### Check Server Health
+- **Request:** `GET /healthz`
+
+### List Databases
+- **List:** `GET /api/v1/databases`
+- **Access:** Requires a token broad enough to list databases, usually
+  `database: "*"` or admin.
+
+### List Collections
+- **List:** `GET /collections`
+- **Access:** Requires access to the database and a token broad enough to list
+  collections, usually `collection: "*"` or admin.
+
+Database and collection creation/deletion are host-managed admin operations.
+For normal app development, writes auto-create the database and collection when
+your scoped key allows the target path.

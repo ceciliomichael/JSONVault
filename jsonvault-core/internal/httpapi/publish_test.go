@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -51,19 +50,19 @@ func TestTransientPublish(t *testing.T) {
 	}()
 
 	reader := bufio.NewReader(resp.Body)
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		t.Fatalf("failed to read from stream: %v", err)
+
+	snapshot := readSSEEvent(t, reader)
+	if snapshot.Action != "presence_state" {
+		t.Fatalf("expected initial presence_state, got %s", snapshot.Action)
 	}
 
-	line = strings.TrimSpace(line)
-	jsonStr := strings.TrimPrefix(line, "data: ")
-
-	var event store.Event
-	json.Unmarshal([]byte(jsonStr), &event)
+	event := readSSEEvent(t, reader)
 
 	if event.Action != "publish" {
 		t.Errorf("expected action 'publish', got '%s'", event.Action)
+	}
+	if event.Sequence != 0 {
+		t.Errorf("expected transient publish event to have no sequence, got %d", event.Sequence)
 	}
 
 	var docData map[string]interface{}

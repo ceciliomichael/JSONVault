@@ -56,6 +56,11 @@ func TestPresenceAPI(t *testing.T) {
 	if client0["client_id"] != "client_1" {
 		t.Errorf("expected client_id client_1, got %v", client0["client_id"])
 	}
+	state := pres3["state"].(map[string]interface{})
+	metas := state["client_1"].([]interface{})
+	if len(metas) != 1 {
+		t.Fatalf("expected 1 presence state entry, got %d", len(metas))
+	}
 
 	// 4. Leave presence
 	leaveBody := []byte(`{"client_id": "client_1"}`)

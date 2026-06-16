@@ -80,7 +80,9 @@ export async function createDashboardProject(
     database = normalizeProjectDatabaseName(randomId);
   } catch (error) {
     throw new DashboardProjectValidationError(
-      error instanceof Error ? error.message : "Failed to generate database ID.",
+      error instanceof Error
+        ? error.message
+        : "Failed to generate database ID.",
     );
   }
   await assertDatabaseIsAvailable(database);

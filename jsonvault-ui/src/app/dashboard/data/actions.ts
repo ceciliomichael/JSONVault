@@ -98,31 +98,46 @@ export async function deleteDocumentsAction(
   const client = createProjectCoreClient(project.database);
   const deleted: string[] = [];
   const missing: string[] = [];
+  let firstError: unknown = null;
 
-  for (const target of normalizedTargets) {
-    try {
-      await deleteProjectDocument(
-        project.database,
-        collection,
-        target.id,
-        target.etag,
-        client,
-      );
-      deleted.push(target.id);
-    } catch (error) {
-      if (error instanceof ProjectDocumentNotFoundError) {
-        missing.push(target.id);
-        continue;
+  const results = await Promise.allSettled(
+    normalizedTargets.map(async (target) => {
+      try {
+        await deleteProjectDocument(
+          project.database,
+          collection,
+          target.id,
+          target.etag,
+          client,
+        );
+        return { status: "deleted" as const, id: target.id };
+      } catch (error) {
+        if (error instanceof ProjectDocumentNotFoundError) {
+          return { status: "missing" as const, id: target.id };
+        }
+        throw error;
       }
-      if (deleted.length > 0) {
-        revalidateDocuments();
+    }),
+  );
+
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      if (result.value.status === "deleted") {
+        deleted.push(result.value.id);
+      } else {
+        missing.push(result.value.id);
       }
-      return handleDocumentMutationError(error, "delete document");
+    } else if (!firstError) {
+      firstError = result.reason;
     }
   }
 
   if (deleted.length > 0) {
     revalidateDocuments();
+  }
+
+  if (firstError && deleted.length === 0) {
+    return handleDocumentMutationError(firstError, "delete document");
   }
 
   if (deleted.length === 0 && missing.length > 0) {

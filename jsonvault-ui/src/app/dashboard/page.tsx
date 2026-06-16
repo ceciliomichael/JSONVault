@@ -1,5 +1,6 @@
 import {
   Activity,
+  BookOpen,
   CheckCircle2,
   Database,
   FileText,
@@ -213,6 +214,17 @@ export default async function OverviewPage() {
             title="Operations"
             description="Track background work"
             href="/dashboard/operations"
+          />
+        </div>
+      </OverviewSection>
+
+      <OverviewSection title="Resources">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <FeatureTile
+            icon={BookOpen}
+            title="Documentation"
+            description="Integration guide & API reference"
+            href="/docs/core-principles"
           />
         </div>
       </OverviewSection>

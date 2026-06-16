@@ -1,0 +1,92 @@
+# Documents (CRUD)
+
+### List Documents
+Retrieve a paginated list of documents, optionally filtered and sorted directly in the query string.
+- **Request:** `GET /{collection}`
+  - **Query Parameters:**
+    - `limit` (max: 1000, default: 100)
+    - `offset` (max: 10000, default: 0)
+    - `sort` (e.g., `?sort=age` for ascending, or `?sort=-created_at` for descending)
+    - `search` (full-text search query, only useful when the host has enabled FTS for the collection)
+    - `filter[<field>]` (e.g., `?filter[status]=%22active%22&filter[age]=30`)
+      *Note: Filter values must be valid JSON strings (e.g. `%22string%22` for strings, `true` for booleans, `42` for numbers).*
+- **Response (200 OK):** An array of documents. (Pagination metadata is returned in `X-Total-Count`, `X-Limit`, `X-Offset` headers).
+
+If a query exceeds configured scan, response, or time budgets, JSONVault returns
+`query_limit_exceeded`. Lower the page size, use a more selective filter, or
+ask the JSONVault host to add an index or adjust server limits.
+
+These budgets are configured by the JSONVault host/operator. As an application
+developer using a hosted JSONVault instance, you do not set the server
+environment variables yourself.
+
+#### When `query_limit_exceeded` Happens
+
+This error means JSONVault stopped the query on purpose before it could consume
+too much CPU, memory, response size, or time on the server.
+
+You might run into it when:
+
+- the collection is large and your filter is not backed by an index;
+- the filter is too broad, such as `status="active"` when most documents are active;
+- the page is too large or each document is large, causing the response byte
+  budget to be exceeded;
+- the query uses a deep `offset`, so the server must walk many matching
+  documents before returning your page;
+- the query sorts a broad result set in memory;
+- the `search` term is too broad and matches too many FTS candidates.
+
+What you can do in app code:
+
+- lower `limit`;
+- add a more selective filter;
+- avoid deep offset pagination for large collections;
+- use more specific search terms;
+- avoid returning very large documents in list views when possible.
+
+Why you may need the host/operator: app developers with normal scoped keys
+cannot create indexes, change FTS indexed fields, raise server resource budgets,
+or resize the machine. Those changes affect server reliability for every user,
+so they belong to the JSONVault host/operator.
+
+Example error:
+
+```json
+{
+  "error": {
+    "code": "query_limit_exceeded",
+    "message": "query exceeds configured resource limit: scanned documents exceeded 50000"
+  }
+}
+```
+
+### Create Document
+- **Request:** `POST /{collection}`
+- **Headers:** `X-Expire-In: <seconds>` (Optional: Automatically delete document after X seconds)
+- **Body:** Any valid JSON object.
+- **Response (201 Created):** Returns the auto-generated `id` and the generated `ETag` header.
+*(Note: `X-Expire-In` must be a positive integer number of seconds no greater than 31536000.)*
+
+### Get Document by ID
+- **Request:** `GET /{collection}/{id}`
+- **Response (200 OK):** Returns the document and its `ETag` header.
+
+### Update or Create Document (Upsert)
+Completely overwrites the document if it exists, or creates a new document using the `{id}` you provide.
+- **Request:** `PUT /{collection}/{id}`
+- **Headers:** 
+  - `If-Match: <your-etag>` (Optional, but highly recommended if updating)
+  - `X-Expire-In: <seconds>` (Optional: Automatically delete document after X seconds)
+- **Body:** The full new JSON object.
+- **Response (200 OK):** Returns the upserted document and its `ETag` header.
+*(Note: `PUT` without `X-Expire-In` clears an existing TTL for that document. `PATCH` preserves the existing TTL.)*
+
+### Partial Update Document (Merge)
+Updates specific fields while preserving the rest (e.g. only updating `status: "completed"`).
+- **Request:** `PATCH /{collection}/{id}`
+- **Headers:** `If-Match: <your-etag>` (Optional, but highly recommended)
+- **Body:** A JSON object containing only the fields to modify.
+
+### Delete Document
+- **Request:** `DELETE /{collection}/{id}`
+- **Headers:** `If-Match: <your-etag>` (Optional)

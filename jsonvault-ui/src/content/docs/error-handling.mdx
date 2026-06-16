@@ -1,0 +1,22 @@
+# Error Handling
+
+All errors follow a standard, predictable JSON format:
+```json
+{
+  "error": {
+    "code": "precondition_failed",
+    "message": "ETag mismatch"
+  }
+}
+```
+
+**Common Status Codes you might encounter:**
+- `400 Bad Request`: Invalid JSON, invalid filter literal, too many filters, offset too large, or schema validation failure.
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: API Key lacks required permissions.
+- `404 Not Found`: Requested document or explicitly managed resource does not exist.
+- `429 Too Many Requests`: Operational/admin rate limit exceeded.
+- `412 Precondition Failed`: The ETag you provided does not match the server's current version (Someone else edited it!).
+- `413 Payload Too Large`: Request body or normalized document exceeds the host-configured size limit.
+- `415 Unsupported Media Type`: Write request is missing `Content-Type: application/json`.
+- `422 Unprocessable Entity`: Query exceeded host-configured scan, response, or time budgets.

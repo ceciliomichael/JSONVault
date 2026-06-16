@@ -27,7 +27,7 @@ import {
   PrimaryButton,
   SecondaryButton,
 } from "@/components/ui";
-import { type DashboardProject } from "@/lib/projects";
+import type { DashboardProject } from "@/lib/projects";
 import { formatDate } from "@/lib/utils";
 import {
   createProjectAction,

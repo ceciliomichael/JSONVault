@@ -52,10 +52,44 @@ export async function GET(
     headers.set("Cache-Control", "no-cache");
     headers.set("Connection", "keep-alive");
 
-    return new Response(response.body, {
+    if (!response.body) {
+      return new Response("No body in response", { status: 500 });
+    }
+
+    const reader = response.body.getReader();
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            controller.enqueue(value);
+          }
+          controller.close();
+        } catch (error: any) {
+          // When the client disconnects, the request.signal aborts the fetch,
+          // which causes reader.read() to throw an AbortError.
+          // We catch it and close gracefully to avoid Next.js "failed to pipe response" logs.
+          if (error.name === "AbortError" || request.signal.aborted) {
+            controller.close();
+            return;
+          }
+          controller.error(error);
+        }
+      },
+      cancel() {
+        reader.cancel().catch(() => {});
+      },
+    });
+
+    return new Response(stream, {
       headers,
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error.name === "AbortError" || request.signal.aborted) {
+      // Ignore abort errors at the top level too
+      return new Response(null, { status: 204 });
+    }
     console.error("SSE Proxy Error:", error);
     return new Response("Internal Server Error", { status: 500 });
   }

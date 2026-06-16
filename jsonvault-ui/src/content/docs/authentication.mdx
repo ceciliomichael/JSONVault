@@ -1,0 +1,29 @@
+# Authentication & Configuration
+
+To connect your application to your JSONVault database, you need two environment variables from your Dashboard's **Connect** panel:
+
+1. `JSONVAULT_API_URL`: Your project's unique base URL.
+2. `JSONVAULT_API_KEY`: Your secret access token.
+
+### Setting up your environment
+
+Add these to your app's `.env` file:
+```bash
+JSONVAULT_API_URL="https://your-host.com/api/v1/[database-id]"
+JSONVAULT_API_KEY="<your-api-key>"
+```
+
+### Accessing the Database
+Every HTTP request (except `/healthz`) MUST include your API Key in the `Authorization` header:
+
+```http
+Authorization: Bearer $JSONVAULT_API_KEY
+Content-Type: application/json
+```
+*(Note: `Content-Type` is strictly required for POST, PUT, and PATCH requests).*
+
+Under the hood, your API key is a scoped JSON Web Token (JWT). If you receive a `403 Forbidden` error or a `401 Unauthorized` error, your key lacks the required permissions for that specific operation.
+
+Normal `read_write` keys are limited to document CRUD, transactions, and transient publish operations. Admin actions (like managing schemas, indexes, webhooks, and full-text search) require elevated project tokens, which should be kept strictly in your trusted backend code.
+
+Use `GET $JSONVAULT_API_URL/../me` (relative to v1) or the dashboard to inspect your token's capabilities.

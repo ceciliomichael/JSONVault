@@ -1,0 +1,22 @@
+# Full-Text Search (FTS)
+
+JSONVault includes a native inverted index engine for searching configured text
+fields. The host/operator chooses which fields are indexed for each collection.
+
+### Querying
+
+You can use the `search` query parameter to instantly intersect tokens and find matching documents. 
+For multiple words, standard URL encoding applies (e.g. `fast+car`).
+
+```bash
+# Find any users where "john" is mentioned in their name or bio
+curl "$JSONVAULT_API_URL/users?search=john" \
+  -H "Authorization: Bearer $JSONVAULT_API_KEY"
+
+# Combine Full-Text Search with B-Tree filters
+curl "$JSONVAULT_API_URL/users?search=engineer&filter[status]=%22active%22" \
+  -H "Authorization: Bearer $JSONVAULT_API_KEY"
+```
+
+If FTS is not configured for the collection, `search` returns no matches.
+Changing the FTS field list requires `fts:manage` or an admin key.

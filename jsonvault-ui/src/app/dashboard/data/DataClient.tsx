@@ -86,10 +86,15 @@ export default function DataClient({
   const [editor, setEditor] = useState<DocumentEditorContext | null>(null);
   const [notice, setNotice] = useState<DocumentActionResult | null>(null);
   const [collectionSearch, setCollectionSearch] = useState("");
+  const [documentRows, setDocumentRows] = useState(documents);
+
+  useEffect(() => {
+    setDocumentRows(documents);
+  }, [documents]);
 
   const pageIds = useMemo(
-    () => documents.map((document) => document.id),
-    [documents],
+    () => documentRows.map((document) => document.id),
+    [documentRows],
   );
   const visibleCollections = useMemo(() => {
     const collectionQuery = collectionSearch.trim().toLowerCase();
@@ -113,8 +118,8 @@ export default function DataClient({
   const canGoNext = offset + limit < total;
 
   const selectedDocuments = useMemo(
-    () => documents.filter((document) => selectedIds.includes(document.id)),
-    [documents, selectedIds],
+    () => documentRows.filter((document) => selectedIds.includes(document.id)),
+    [documentRows, selectedIds],
   );
 
   useEffect(() => setQuery(search), [search]);
@@ -260,6 +265,11 @@ export default function DataClient({
       );
       setNotice(result);
       if (result.status !== "error") {
+        setDocumentRows((current) =>
+          current.filter(
+            (doc) => !deleteTargets.some((target) => target.id === doc.id),
+          ),
+        );
         setSelectedIds((current) =>
           current.filter(
             (id) => !deleteTargets.some((target) => target.id === id),
@@ -460,7 +470,7 @@ export default function DataClient({
                     checked={allVisibleSelected}
                     mixed={someVisibleSelected}
                     checkedIcon="dash"
-                    disabled={documents.length === 0}
+                    disabled={documentRows.length === 0}
                     label="Select visible documents"
                     onClick={toggleVisibleDocuments}
                   />
@@ -476,7 +486,7 @@ export default function DataClient({
               </tr>
             </thead>
             <tbody
-              className={`divide-y divide-zinc-100 dark:divide-white/5 ${selectedCollection && documents.length > 0 ? "border-b border-zinc-100 dark:border-white/5" : ""}`}
+              className={`divide-y divide-zinc-100 dark:divide-white/5 ${selectedCollection && documentRows.length > 0 ? "border-b border-zinc-100 dark:border-white/5" : ""}`}
             >
               {!selectedCollection ? (
                 <tr>
@@ -486,7 +496,7 @@ export default function DataClient({
                     />
                   </td>
                 </tr>
-              ) : documents.length === 0 ? (
+              ) : documentRows.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-16">
                     <EmptyCollectionState
@@ -496,7 +506,8 @@ export default function DataClient({
                   </td>
                 </tr>
               ) : (
-                documents.map((document) => (
+                documentRows.map((document) => (
+                  // biome-ignore lint/a11y/useSemanticElements: Table rows stay semantic while supporting whole-row document editing.
                   <tr
                     key={document.id}
                     className="cursor-pointer transition-colors hover:bg-zinc-50 focus-within:bg-zinc-50 dark:hover:bg-zinc-900/50 dark:focus-within:bg-zinc-900/50"

@@ -1,0 +1,17 @@
+# Core Principles (The "Quirks")
+
+Before diving into the API, you must understand these three core features of JSONVault. Knowing these will save you hours of debugging!
+
+### 1. Lazy Auto-Creation
+You **never** need to explicitly create a database or a collection. 
+When you insert your first document into `my_app_db/users`, JSONVault automatically provisions the database and collection in milliseconds.
+* **The Quirk:** Because of this, if you query a collection that hasn't been created yet (e.g. `GET /users` on a fresh install), JSONVault will gracefully return an empty array `[]`. It will **not** throw a 404 error, keeping your frontend code incredibly simple!
+
+### 2. Built for Real-Time (SSE)
+Instead of hammering the server with continuous polling, JSONVault has an internal event bus. You can open a Server-Sent Events (SSE) connection to any collection, and the database will instantly stream all inserts, updates, and deletes directly to your app.
+* **The Quirk:** You can subscribe to a collection *before it even exists*. The server will hold the connection open gracefully until the first document is inserted. 
+
+### 3. Optimistic Concurrency (ETags)
+To prevent two users from accidentally overwriting each other's edits, JSONVault uses cryptographic **ETags**. 
+When you read a document, you get an `ETag`. When you update that document, you send the `ETag` back in the `If-Match` HTTP header. If someone else changed the document in the meantime, your update is safely rejected with a `412 Precondition Failed`.
+* **The Quirk:** JSONVault is incredibly forgiving. Even if your proxy (like Cloudflare or Next.js) aggressively mutates your ETag by adding `W/` or stripping quotes, JSONVault will automatically extract the underlying cryptographic hash and match it perfectly.

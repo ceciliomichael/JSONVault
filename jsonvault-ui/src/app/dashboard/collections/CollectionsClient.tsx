@@ -37,18 +37,23 @@ export default function CollectionsClient({
   const [deleteTargets, setDeleteTargets] = useState<string[]>([]);
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [notice, setNotice] = useState<CollectionActionResult | null>(null);
+  const [collectionRows, setCollectionRows] = useState(collections);
+
+  useEffect(() => {
+    setCollectionRows(collections);
+  }, [collections]);
 
   const collectionNames = useMemo(
-    () => collections.map((collection) => collection.name),
-    [collections],
+    () => collectionRows.map((collection) => collection.name),
+    [collectionRows],
   );
   const visibleCollections = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return collections;
-    return collections.filter((collection) =>
+    if (!normalizedQuery) return collectionRows;
+    return collectionRows.filter((collection) =>
       collection.name.toLowerCase().includes(normalizedQuery),
     );
-  }, [collections, query]);
+  }, [collectionRows, query]);
   const visibleNames = visibleCollections.map((collection) => collection.name);
   const allVisibleSelected =
     visibleNames.length > 0 &&
@@ -96,6 +101,9 @@ export default function CollectionsClient({
       const result = await deleteCollectionsAction(deleteTargets);
       setNotice(result);
       if (result.status !== "error") {
+        setCollectionRows((current) =>
+          current.filter((c) => !deleteTargets.includes(c.name)),
+        );
         setSelectedNames((current) =>
           current.filter((name) => !deleteTargets.includes(name)),
         );
@@ -236,7 +244,7 @@ export default function CollectionsClient({
             <tbody
               className={`divide-y divide-zinc-100 dark:divide-white/5 ${visibleCollections.length > 0 ? "border-b border-zinc-100 dark:border-white/5" : ""}`}
             >
-              {collections.length === 0 ? (
+              {collectionRows.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-6 py-16">
                     <EmptyState
@@ -258,6 +266,7 @@ export default function CollectionsClient({
                 visibleCollections.map((collection) => {
                   const href = `/dashboard/data?collection=${encodeURIComponent(collection.name)}`;
                   return (
+                    // biome-ignore lint/a11y/useSemanticElements: Table rows stay semantic while supporting whole-row navigation.
                     <tr
                       key={collection.name}
                       className="cursor-pointer transition-colors hover:bg-zinc-50 focus-within:bg-zinc-50 dark:hover:bg-zinc-900/50 dark:focus-within:bg-zinc-900/50"

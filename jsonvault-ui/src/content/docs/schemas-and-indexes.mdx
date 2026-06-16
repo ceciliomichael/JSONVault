@@ -1,0 +1,35 @@
+# Schemas & Indexes
+
+### Schemas & Validation (Host-Managed)
+
+JSONVault is schemaless by default. A host/operator can attach a Draft-07 JSON
+Schema to a collection to enforce document shape.
+
+As an application developer:
+
+- **Inspect active schema:** `GET /{collection}/schema`
+- **No schema response:** `{"schema": null}`
+- **Validation failure:** `400 Bad Request` with error code `schema_validation_failed`
+
+Schema creation and removal require `schemas:manage` or an admin key. If a write
+starts failing because of validation, compare your payload with the active
+schema or ask the host/operator/project owner to update the collection schema.
+
+---
+
+### Secondary Indexes (Host-Managed)
+
+Filters work whether or not an index exists. Without an index, JSONVault may
+need to scan documents until the query matches, reaches the page limit, or hits
+a host-configured query budget.
+
+As an application developer:
+
+- Use `filter[<field>]` normally.
+- Inspect configured indexes with `GET /{collection}/indexes`.
+- If a query returns `query_limit_exceeded`, reduce the page size, use a more
+  selective filter, or ask the host/operator to add an index.
+
+Creating and deleting indexes require `indexes:manage` or an admin key. Index
+builds backfill existing documents and are promoted only when ready, so normal
+queries do not use partially built indexes.

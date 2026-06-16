@@ -313,6 +313,7 @@ export default function OperationsClient({
                   const meta = STATE_META[operation.state] ?? STATE_META.queued;
                   const Icon = meta.icon;
                   return (
+                    // biome-ignore lint/a11y/useSemanticElements: Table rows stay semantic while supporting whole-row details.
                     <tr
                       key={operation.operation_id}
                       className="cursor-pointer hover:bg-zinc-50 focus-within:bg-zinc-50 dark:hover:bg-zinc-900/50 dark:focus-within:bg-zinc-900/50 transition-colors"

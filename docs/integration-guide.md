@@ -113,7 +113,9 @@ Open a persistent HTTP connection to receive live document mutations.
 > **The Delete Quirk:** Notice that the `delete` action payload completely omits the `document` object. When parsing SSE events, always rely on `event.document_id` to identify the document that was deleted, otherwise your application will crash trying to read `event.document.id`.
 Use the standard `Last-Event-ID` header, or `?last_event_id=<sequence>`, to replay retained committed document events after reconnecting. Transient `publish` messages are not stored and cannot be replayed.
 
-*(Note: To prevent proxies from dropping idle connections, JSONVault sends a silent `: keepalive` comment every 15 seconds. Standard EventSource clients handle this automatically. If a subscriber falls behind, JSONVault closes the stream; clients should reconnect with the last event ID.)*
+Each new subscription also receives one sequence-less `presence_state` event before live events. This is a snapshot of the current presence list for the subscribed collection. Presence and `publish` events are transient, have no SSE `id`, and are not replayed by `Last-Event-ID`.
+
+*(Note: To prevent proxies from dropping idle connections, JSONVault sends a silent `: keepalive` comment every 5 seconds. Standard EventSource clients handle this automatically. If a subscriber falls behind, JSONVault closes the stream; clients should reconnect with the last event ID.)*
 
 #### Publish Transient Message (Pub/Sub)
 Instantly broadcast a JSON message to all active SSE subscribers without saving it to the database disk. Perfect for ephemeral events like "User is typing...".
@@ -128,13 +130,15 @@ JSONVault features a native, heartbeat-driven presence system for tracking onlin
 To join presence, clients send a `POST /heartbeat` request. This must be repeated every 15 seconds to keep the session alive.
 - **Request:** `POST /{collection}/heartbeat`
 - **Body:** `{"client_id": "user_123", "metadata": {"name": "Alice"}}` (metadata is optional)
-- **Response (200 OK):** `{"ok": true}`
+- **Response (200 OK):** `{"ok": true, "joined": true, "updated": false, "expires_at": "2026-06-11T10:30:00Z"}`
+
+The first heartbeat for a `client_id` emits `presence_join`. Later heartbeats only extend expiry unless metadata changes; metadata changes emit `presence_update`.
 
 **2. Leave Presence Gracefully**
 When a user navigates away, you can use `navigator.sendBeacon` to instantly evict them from the presence list.
 - **Request:** `DELETE /{collection}/heartbeat`
 - **Body:** `{"client_id": "user_123"}`
-- **Response (200 OK):** `{"ok": true}`
+- **Response (200 OK):** `{"ok": true, "left": true}`
 *(Note: If a client crashes or loses connection without sending a leave request, they are automatically evicted after 30 seconds).*
 
 **3. Get Active Clients**
@@ -148,15 +152,20 @@ Retrieve the current list of online clients and their metadata.
   "count": 1,
   "clients": [
     {"client_id": "user_123", "metadata": {"name": "Alice"}, "joined_at": "...", "expires_at": "..."}
-  ]
+  ],
+  "state": {
+    "user_123": [
+      {"client_id": "user_123", "metadata": {"name": "Alice"}, "joined_at": "...", "expires_at": "..."}
+    ]
+  }
 }
 ```
 
 > [!TIP]
 > **Listen for Presence Events:**
-> When you subscribe to a collection (`GET /{collection}/subscribe`), you will automatically receive `presence_join` and `presence_leave` SSE events when clients heartbeat for the first time or leave/expire. 
+> When you subscribe to a collection (`GET /{collection}/subscribe`), you first receive a `presence_state` SSE event with the same `state` shape as `GET /presence`. You will then receive `presence_join`, `presence_update`, and `presence_leave` SSE events when clients join, update metadata, leave, or expire.
 > 
-> **Best Practice:** Do **not** use `+1` or `-1` to increment your local counter when receiving these events. Deltas are extremely fragile against dropped connections or race conditions during page reloads. Instead, treat these events as a signal to **re-fetch** the authoritative count from `GET /{collection}/presence`.
+> **Best Practice:** Treat `presence_state` as the initial source of truth, then merge live presence events by `client_id`. If your client misses events or reconnects, use the next `presence_state` snapshot or re-fetch `GET /{collection}/presence` instead of incrementing or decrementing counters manually.
 
 > [!WARNING]
 > **Beware of Fetch Caching:**
